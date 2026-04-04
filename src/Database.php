@@ -38,6 +38,20 @@ class Database {
             // La columna ya existe, no hay nada que hacer
         }
 
+        // Migración: clave canónica para deduplicación robusta (ej. InfoFunes cambia slugs)
+        // El índice es parcial (WHERE canonical_key IS NOT NULL) para no afectar fuentes
+        // sin clave canónica propia — SQLite trata los NULL como valores distintos.
+        try {
+            $this->pdo->exec("ALTER TABLE news ADD COLUMN canonical_key TEXT");
+        } catch (\Exception $e) {
+            // La columna ya existe
+        }
+        $this->pdo->exec("
+            CREATE UNIQUE INDEX IF NOT EXISTS uq_canonical_key
+            ON news (canonical_key)
+            WHERE canonical_key IS NOT NULL
+        ");
+
         // Tabla de configuración clave-valor (ej: timestamp de última actualización)
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS config (
@@ -55,20 +69,21 @@ class Database {
      */
     public function saveNews(array $newsItems): void {
         $stmt = $this->pdo->prepare("
-            INSERT OR IGNORE INTO news (title, link, image_url, source, pub_date, description)
-            VALUES (:title, :link, :image_url, :source, :pub_date, :description)
+            INSERT OR IGNORE INTO news (title, link, image_url, source, pub_date, description, canonical_key)
+            VALUES (:title, :link, :image_url, :source, :pub_date, :description, :canonical_key)
         ");
 
         // Transacción para mejorar el rendimiento en inserciones masivas
         $this->pdo->beginTransaction();
         foreach ($newsItems as $item) {
             $stmt->execute([
-                ':title' => $item['title'],
-                ':link' => $item['link'],
-                ':image_url' => $item['image_url'],
-                ':source' => $item['source'],
-                ':pub_date' => $item['pub_date'],
-                ':description' => $item['description'] ?? null
+                ':title'         => $item['title'],
+                ':link'          => $item['link'],
+                ':image_url'     => $item['image_url'],
+                ':source'        => $item['source'],
+                ':pub_date'      => $item['pub_date'],
+                ':description'   => $item['description'] ?? null,
+                ':canonical_key' => $item['canonical_key'] ?? null,
             ]);
         }
         $this->pdo->commit();
@@ -137,6 +152,20 @@ class Database {
         $stmt = $this->pdo->prepare("SELECT * FROM news WHERE id = :id");
         $stmt->execute([':id' => (int)$id]);
         return $stmt->fetch(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Devuelve todos los links almacenados para una fuente concreta.
+     * Se usa para deduplicar artículos al agregar, evitando re-insertar
+     * artículos que ya existen con distinto slug (ej. InfoFunes).
+     *
+     * @param string $source Nombre del medio
+     * @return string[]      Array de URLs ya guardadas
+     */
+    public function getLinksBySource(string $source): array {
+        $stmt = $this->pdo->prepare("SELECT link FROM news WHERE source = :source");
+        $stmt->execute([':source' => $source]);
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
 
     /**

@@ -43,12 +43,71 @@ class Aggregator {
             $scrapedItems = $this->scrapeHtmlPage($url, $name);
             $newsList = array_merge($newsList, $scrapedItems);
         }
-        
+
         if (!empty($newsList)) {
+            $newsList = $this->deduplicateItems($newsList);
             $this->db->saveNews($newsList);
         }
         
         $this->db->setLastUpdate(time());
+    }
+
+    /**
+     * Calcula una clave canónica para deduplicación.
+     * Algunos medios (como InfoFunes) cambian el slug de la URL pero conservan
+     * un identificador hexadecimal único al final; ese ID es la clave real del artículo.
+     * Para el resto de fuentes se usa la URL completa en minúsculas sin trailing slash.
+     *
+     * @param string $link   URL del artículo
+     * @param string $source Nombre del medio
+     * @return string        Clave canónica de deduplicación
+     */
+    private function canonicalKey(string $link, string $source): string {
+        $normalized = rtrim(strtolower($link), '/');
+
+        // InfoFunes: la URL termina en _<hexhash> (ej. _a69d106b20041d9a647fb07ec)
+        if ($source === 'InfoFunes' && preg_match('/_([0-9a-f]{16,})$/', $normalized, $m)) {
+            return 'infofunes:' . $m[1];
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Elimina artículos duplicados del lote, usando la clave canónica de cada enlace.
+     * También descarta ítems cuya clave canónica ya existe en la base de datos.
+     *
+     * @param array $items Lista de noticias recién obtenidas
+     * @return array       Lista sin duplicados
+     */
+    private function deduplicateItems(array $items): array {
+        // Construir set de claves ya persistidas en BD (solo fuentes que lo requieren)
+        $existingBySource = [];
+        foreach ($items as $item) {
+            $existingBySource[$item['source']] = true;
+        }
+        $existingKeys = [];
+        foreach (array_keys($existingBySource) as $source) {
+            foreach ($this->db->getLinksBySource($source) as $link) {
+                $existingKeys[$this->canonicalKey($link, $source)] = true;
+            }
+        }
+
+        $seen    = [];
+        $deduped = [];
+        foreach ($items as $item) {
+            $key = $this->canonicalKey($item['link'], $item['source']);
+            if (isset($seen[$key]) || isset($existingKeys[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            // Solo se guarda canonical_key cuando es distinta a la URL normalizada,
+            // es decir, para fuentes que reutilizan un ID estable (ej. InfoFunes).
+            $item['canonical_key'] = str_starts_with($key, 'infofunes:') ? $key : null;
+            $deduped[] = $item;
+        }
+
+        return $deduped;
     }
 
     /**
