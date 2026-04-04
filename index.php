@@ -5,12 +5,20 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FunesNews - Tu portal de noticias locales</title>
     <meta name="description" content="Las últimas noticias de la ciudad de Funes, Santa Fe. Se actualiza cada 2 minutos de múltiples fuentes locales.">
-    <!-- Google Fonts -->
+    <!-- Google Fonts: carga asíncrona para no bloquear el render (FCP) -->
+    <!-- preconnect reduce la latencia DNS+TCP+TLS antes de que el CSS las solicite -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
-    <!-- Custom CSS -->
-    <link rel="stylesheet" href="assets/css/style.css">
+    <!-- preload + onload: descarga la hoja de fuentes sin bloquear el render.
+         Mientras no carga, el browser usa la fuente del sistema (display=swap). -->
+    <link rel="preload" as="style"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Outfit:wght@400;600;700&display=swap"
+          onload="this.onload=null;this.rel='stylesheet'">
+    <noscript>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Outfit:wght@400;600;700&display=swap">
+    </noscript>
+    <!-- Custom CSS con cache-buster basado en fecha de modificación del archivo -->
+    <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
 </head>
 <body>
     <!-- Premium Dark Header -->
@@ -82,6 +90,6 @@
         </div>
     </footer>
 
-    <script src="assets/js/main.js"></script>
+    <script src="assets/js/main.js?v=<?= filemtime(__DIR__ . '/assets/js/main.js') ?>"></script>
 </body>
 </html>

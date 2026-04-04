@@ -211,6 +211,8 @@ if ($rawSummary) {
                     src="<?= $imageUrl ?>"
                     alt="<?= $title ?>"
                     class="article-image"
+                    width="1200"
+                    height="630"
                     onerror="this.style.display='none'"
                 >
             <?php endif; ?>

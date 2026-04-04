@@ -4,11 +4,11 @@ declare(strict_types=1);
 /**
  * Endpoint REST que devuelve noticias locales en formato JSON.
  * Lanza el aggregator en background para no bloquear la respuesta al usuario.
+ * Soporta ETag/304 para reducir tráfico en las peticiones de polling.
  */
 header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
-header('Cache-Control: no-store');
 
 require_once __DIR__ . '/../src/Database.php';
 
@@ -23,12 +23,24 @@ try {
     // no disparen múltiples procesos.
     if ($minutesPassed >= 2) {
         $db->setLastUpdate(time());
+        $lastUpdate = $db->getLastUpdate(); // Actualizar valor local tras el cambio
         $script = realpath(__DIR__ . '/../scripts/run_aggregator.php');
         if ($script !== false) {
             // Windows: start /b lanza el proceso sin bloquear
             $php = PHP_BINARY;
             pclose(popen("cmd /c start /b \"\" \"{$php}\" \"{$script}\" > NUL 2>&1", 'r'));
         }
+    }
+
+    // ETag basado en last_update: si el cliente ya tiene la versión actual,
+    // responder 304 sin cuerpo (ahorra todo el JSON en la mayoría de polls).
+    $etag = '"' . $lastUpdate . '"';
+    header('ETag: ' . $etag);
+    header('Cache-Control: no-cache'); // Siempre revalidar, pero permitir caché local
+
+    if (isset($_SERVER['HTTP_IF_NONE_MATCH']) && $_SERVER['HTTP_IF_NONE_MATCH'] === $etag) {
+        http_response_code(304);
+        exit;
     }
 
     // Sanitizar y validar parámetros de entrada
@@ -50,7 +62,7 @@ try {
 
     echo json_encode([
         'status'      => 'success',
-        'last_update' => date('Y-m-d H:i:s', $db->getLastUpdate()),
+        'last_update' => date('Y-m-d H:i:s', $lastUpdate),
         'sources'     => $allSources,
         'page'        => $page,
         'has_more'    => count($news) === $limit,

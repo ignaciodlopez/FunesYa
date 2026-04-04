@@ -52,6 +52,12 @@ class Database {
             WHERE canonical_key IS NOT NULL
         ");
 
+        // Índices de rendimiento para las queries más frecuentes.
+        // idx_pub_date: acelera ORDER BY pub_date DESC (lista principal).
+        // idx_source_date: acelera WHERE source = ? ORDER BY pub_date DESC (filtros por fuente).
+        $this->pdo->exec("CREATE INDEX IF NOT EXISTS idx_news_pub_date    ON news (pub_date DESC)");
+        $this->pdo->exec("CREATE INDEX IF NOT EXISTS idx_news_source_date ON news (source, pub_date DESC)");
+
         // Tabla de configuración clave-valor (ej: timestamp de última actualización)
         $this->pdo->exec("
             CREATE TABLE IF NOT EXISTS config (

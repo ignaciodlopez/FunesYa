@@ -30,3 +30,45 @@ Options -Indexes
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
     Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
 </IfModule>
+
+# ──────────────────────────────────────────────
+# Compresión Gzip (reduce ~70% el tamaño de HTML/CSS/JS/JSON)
+# Impacto: FCP y TTI más bajos, menos bytes transferidos en cada request.
+# ──────────────────────────────────────────────
+<IfModule mod_deflate.c>
+    AddOutputFilterByType DEFLATE text/html
+    AddOutputFilterByType DEFLATE text/css
+    AddOutputFilterByType DEFLATE application/javascript
+    AddOutputFilterByType DEFLATE application/json
+    AddOutputFilterByType DEFLATE text/plain
+    AddOutputFilterByType DEFLATE image/svg+xml
+</IfModule>
+
+# ──────────────────────────────────────────────
+# Caché del navegador para assets estáticos
+# CSS/JS: 1 semana (con cache-busting via ?v= en index.php)
+# Imágenes/fuentes: 1 mes (cambian raramente)
+# Impacto directo en visitas recurrentes: 0 requests HTTP para assets ya descargados.
+# ──────────────────────────────────────────────
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType text/css                  "access plus 7 days"
+    ExpiresByType application/javascript    "access plus 7 days"
+    ExpiresByType image/jpeg                "access plus 30 days"
+    ExpiresByType image/png                 "access plus 30 days"
+    ExpiresByType image/gif                 "access plus 30 days"
+    ExpiresByType image/webp                "access plus 30 days"
+    ExpiresByType image/svg+xml             "access plus 30 days"
+    ExpiresByType image/x-icon              "access plus 1 year"
+    ExpiresByType font/woff2                "access plus 1 year"
+    ExpiresByType font/woff                 "access plus 1 year"
+</IfModule>
+
+# Eliminar ETags de archivos estáticos (los Expires son suficientes y evitan
+# la negociación de caché innecesaria en Apache multi-servidor)
+<IfModule mod_headers.c>
+    <FilesMatch "\.(css|js|jpg|jpeg|png|gif|webp|ico|woff|woff2)$">
+        Header unset ETag
+        FileETag None
+    </FilesMatch>
+</IfModule>

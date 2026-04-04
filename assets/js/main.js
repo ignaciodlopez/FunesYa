@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const imgSrc = resolveImgSrc(item.image_url);
         card.innerHTML = `
             <div class="card-img-wrapper">
-                <img src="${escHtml(imgSrc)}" alt="${escHtml(item.title)}" loading="lazy">
+                <img src="${escHtml(imgSrc)}" alt="${escHtml(item.title)}" loading="lazy" width="640" height="360">
                 <span class="card-source">${escHtml(item.source)}</span>
             </div>
             <div class="card-content">
