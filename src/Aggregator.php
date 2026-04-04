@@ -258,38 +258,10 @@ class Aggregator {
     }
 
     /**
-     * Genera 3 noticias de ejemplo para una fuente cuando su feed no está disponible.
-     *
-     * @param string $sourceName Nombre de la fuente
-     * @return array             Lista de noticias ficticias con datos válidos
+     * Si un feed falla, no se insertan datos ficticios.
+     * Devuelve array vacío para no contaminar el feed con contenido falso.
      */
     private function getMockData(string $sourceName): array {
-        $date = date('Y-m-d H:i:s', time() - rand(100, 10000));
-        return [
-            [
-                'title' => "Noticia Destacada de Funes ($sourceName)",
-                'link' => "https://example.com/mock-" . uniqid(),
-                'image_url' => "https://picsum.photos/400/300?random=" . rand(1, 100),
-                'source' => $sourceName,
-                'pub_date' => $date,
-                'description' => 'Esta es una noticia de ejemplo generada automáticamente porque el feed no está disponible en este momento.'
-            ],
-            [
-                'title' => "Actualidad local: Lo que debes saber ($sourceName)",
-                'link' => "https://example.com/mock-" . uniqid(),
-                'image_url' => "https://picsum.photos/400/300?random=" . rand(101, 200),
-                'source' => $sourceName,
-                'pub_date' => date('Y-m-d H:i:s', strtotime($date) - 86400),
-                'description' => 'Contenido de ejemplo. El feed de esta fuente no está disponible temporalmente.'
-            ],
-            [
-                'title' => "Eventos del fin de semana en nuestra ciudad ($sourceName)",
-                'link' => "https://example.com/mock-" . uniqid(),
-                'image_url' => "https://picsum.photos/400/300?random=" . rand(201, 300),
-                'source' => $sourceName,
-                'pub_date' => date('Y-m-d H:i:s', strtotime($date) - 186400),
-                'description' => 'Contenido de ejemplo. El feed de esta fuente no está disponible temporalmente.'
-            ]
-        ];
+        return [];
     }
 }

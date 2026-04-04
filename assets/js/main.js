@@ -189,37 +189,26 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     /**
-     * Muestra un banner sticky encima del feed cuando llegan noticias nuevas.
-     * Al hacer click en el banner hace scroll al tope del feed.
+     * Muestra una notificación no interactiva cuando llegan noticias nuevas.
+     * Se oculta automáticamente después de 4 segundos.
      * @param {number} count - Cantidad de noticias nuevas.
      */
     const showNewsBanner = (count) => {
-        // Si ya hay un banner, sólo actualiza el texto
         const existing = document.getElementById('new-news-banner');
         if (existing) {
             existing.querySelector('.banner-text').textContent =
-                `↑ ${count} nueva${count > 1 ? 's noticias' : ' noticia'} — ver`;
+                `${count} nueva${count > 1 ? 's noticias' : ' noticia'} disponible${count > 1 ? 's' : ''}`;
             return;
         }
 
         const banner = document.createElement('div');
         banner.id = 'new-news-banner';
         banner.className = 'new-news-banner';
-        banner.innerHTML = `
-            <span class="banner-text">↑ ${count} nueva${count > 1 ? 's noticias' : ' noticia'} — ver</span>
-            <button class="banner-close" aria-label="Cerrar">×</button>
-        `;
+        banner.innerHTML = `<span class="banner-text">${count} nueva${count > 1 ? 's noticias' : ' noticia'} disponible${count > 1 ? 's' : ''}</span>`;
 
-        // Click en el banner: scroll al primer card nuevo
-        banner.addEventListener('click', (e) => {
-            if (!e.target.classList.contains('banner-close')) {
-                newsContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-            banner.remove();
-        });
-
-        // Insertar justo antes del grid de noticias
         newsContainer.parentElement.insertBefore(banner, newsContainer);
+
+        setTimeout(() => banner.remove(), 4000);
     };
 
     // ── Eventos ─────────────────────────────────────────────────────────

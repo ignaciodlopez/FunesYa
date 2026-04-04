@@ -25,10 +25,11 @@ $pubDate      = date('d \d\e F \d\e Y, H:i', strtotime($article['pub_date']));
 $imageUrl     = htmlspecialchars($article['image_url'] ?? '', ENT_QUOTES, 'UTF-8');
 $externalLink = htmlspecialchars($article['link'], ENT_QUOTES, 'UTF-8');
 
-// Usar descripción guardada o generarla con IA si no existe
+// Usar descripción guardada o generarla con IA si es un snippet de RSS o no existe
 $rawSummary = $article['description'];
-if (!$rawSummary && !str_starts_with($article['link'], 'https://example.com')) {
-    $rawSummary = (new ArticleSummarizer($db))->getSummary($article);
+$isRssSnippet = $rawSummary && str_ends_with(rtrim($rawSummary), '...');
+if ((!$rawSummary || $isRssSnippet) && !str_starts_with($article['link'], 'https://example.com')) {
+    $rawSummary = (new ArticleSummarizer($db))->getSummary($article) ?? $rawSummary;
 }
 
 $summaryParagraphs = [];
