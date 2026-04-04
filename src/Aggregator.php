@@ -106,49 +106,62 @@ class Aggregator {
 
     /**
      * Extrae la URL de la imagen principal de un ítem RSS.
-     * Busca en: enclosure, media:content, content:encoded y description.
-     * Si no encuentra ninguna, genera un placeholder único con Picsum basado en la URL del artículo.
+     * Prioridad: enclosure > media:content > content:encoded > description >
+     *            og:image de la página original > placeholder Picsum.
+     * Se usa og:image como fallback (no como primera opción) para evitar
+     * una petición HTTP extra cuando el RSS ya embedía la imagen correcta.
      *
      * @param SimpleXMLElement $item Ítem del feed RSS
      * @return string                URL de la imagen o del placeholder
      */
     private function extractImage(SimpleXMLElement $item): string {
+        $link = trim((string)$item->link);
+
+        // 1º: enclosure del RSS
         if (isset($item->enclosure)) {
             foreach ($item->enclosure as $enc) {
                 $type = (string)$enc['type'];
                 if (strpos($type, 'image/') !== false) {
                     $url = (string)$enc['url'];
-                    if (strpos(strtolower($url), '.gif') === false) return $url;
+                    if (stripos($url, '.gif') === false) return $url;
                 }
             }
         }
-        
+
+        // 2º: media:content
         $media = $item->children('media', true);
         if (isset($media->content)) {
             $url = (string)$media->content->attributes()->url;
-            if (strpos(strtolower($url), '.gif') === false) return $url;
+            if ($url !== '' && stripos($url, '.gif') === false) return $url;
         }
 
-        // Busca imagen válida en el campo content:encoded
+        // 3º: primer <img> en content:encoded
         $content = $item->children('content', true);
         if (isset($content->encoded)) {
-             if (preg_match_all('/<img[^>]+src=["\']([^"\']+)["\']/i', (string)$content->encoded, $matches)) {
-                 foreach ($matches[1] as $imgUrl) {
-                     if (strpos(strtolower($imgUrl), '.gif') === false) return $imgUrl;
-                 }
-             }
-        }
-
-        // Busca imagen válida en la descripción del ítem
-        $description = (string)$item->description;
-        if (preg_match_all('/<img[^>]+src=["\']([^"\']+)["\']/i', $description, $matches)) {
-            foreach ($matches[1] as $imgUrl) {
-                if (strpos(strtolower($imgUrl), '.gif') === false) return $imgUrl;
+            if (preg_match_all('/<img[^>]+src=["\']([^"\']+)["\']/i', (string)$content->encoded, $matches)) {
+                foreach ($matches[1] as $imgUrl) {
+                    if (stripos($imgUrl, '.gif') === false) return $imgUrl;
+                }
             }
         }
 
-        // Fallback: placeholder único generado con Picsum, semillado por URL para mayor variedad
-        $link = trim((string)$item->link);
+        // 4º: primer <img> en la descripción del ítem
+        $rawDesc = (string)$item->description;
+        if (preg_match_all('/<img[^>]+src=["\']([^"\']+)["\']/i', $rawDesc, $matches)) {
+            foreach ($matches[1] as $imgUrl) {
+                if (stripos($imgUrl, '.gif') === false) return $imgUrl;
+            }
+        }
+
+        // 5º: og:image / twitter:image del artículo original (fallback)
+        if ($link !== '') {
+            $ogImage = $this->fetchOgImage($link);
+            if ($ogImage !== null && stripos($ogImage, '.gif') === false) {
+                return $ogImage;
+            }
+        }
+
+        // Último recurso: placeholder único generado con Picsum
         $seed = substr(md5($link), 0, 8);
         return "https://picsum.photos/seed/{$seed}/600/400";
     }
@@ -224,20 +237,29 @@ class Aggregator {
                 }
             }
 
-            // Buscar imagen más cercana al link
+            // 1º: imagen más cercana al link en el HTML del listado
             $image = null;
             $pos   = strpos($html, parse_url($link, PHP_URL_PATH));
             if ($pos !== false) {
                 $chunk = substr($html, max(0, $pos - 600), 1200);
                 if (preg_match('/<img[^>]+src=["\']([^"\']+)["\'][^>]*>/i', $chunk, $im)) {
                     $src = $im[1];
-                    if (strpos(strtolower($src), '.gif') === false) {
+                    if (stripos($src, '.gif') === false) {
                         $image = str_starts_with($src, '/') ? $baseUrl . $src : $src;
                     }
                 }
             }
 
-            if (!$image) {
+            // 2º: og:image / twitter:image del artículo original (fallback)
+            if ($image === null) {
+                $ogImage = $this->fetchOgImage($link);
+                if ($ogImage !== null && stripos($ogImage, '.gif') === false) {
+                    $image = $ogImage;
+                }
+            }
+
+            // Último recurso: placeholder Picsum
+            if ($image === null) {
                 $seed  = substr(md5($link), 0, 8);
                 $image = "https://picsum.photos/seed/{$seed}/600/400";
             }
@@ -255,6 +277,90 @@ class Aggregator {
         }
 
         return !empty($items) ? $items : $this->getMockData($sourceName);
+    }
+
+    /**
+     * Obtiene la imagen principal de una URL buscando los meta tags
+     * og:image o twitter:image en el <head> de la página.
+     * Solo descarga los primeros 15 KB para no procesar el body completo.
+     *
+     * @param string $url URL del artículo
+     * @return string|null URL de la imagen, o null si no se encontró
+     */
+    private function fetchOgImage(string $url): ?string
+    {
+        $ctx = stream_context_create([
+            'http' => [
+                'timeout'         => 5,
+                'user_agent'      => 'FunesNewsAgent/1.0',
+                'follow_location' => 1,
+            ],
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+        ]);
+
+        $html = @file_get_contents($url, false, $ctx);
+        if ($html === false) {
+            return null;
+        }
+
+        // Solo procesar el <head> (primeros 15 KB) para mayor eficiencia
+        $head = substr($html, 0, 15000);
+
+        $raw = null;
+
+        // og:image — property antes de content
+        if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']/i', $head, $m)) {
+            $raw = trim($m[1]);
+        }
+        // og:image — content antes de property
+        elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']/i', $head, $m)) {
+            $raw = trim($m[1]);
+        }
+        // twitter:image — name/property antes de content
+        elseif (preg_match('/<meta[^>]+(?:name|property)=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']/i', $head, $m)) {
+            $raw = trim($m[1]);
+        }
+        // twitter:image — content antes de name/property
+        elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']twitter:image["\']/i', $head, $m)) {
+            $raw = trim($m[1]);
+        }
+
+        if ($raw === null || $raw === '') {
+            return null;
+        }
+
+        // Resolver URLs relativas contra la URL base del artículo
+        $parsed = parse_url($url);
+        $scheme = $parsed['scheme'] ?? 'https';
+        $host   = $parsed['host']   ?? '';
+
+        if (str_starts_with($raw, 'http://') || str_starts_with($raw, 'https://')) {
+            // URL absoluta: usar tal cual
+            return $raw;
+        }
+        if (str_starts_with($raw, '//')) {
+            // Protocol-relative: verificar que el host sea real (tiene punto)
+            $withScheme = $scheme . ':' . $raw;
+            $parsedImg  = parse_url($withScheme);
+            if (isset($parsedImg['host']) && str_contains($parsedImg['host'], '.')) {
+                return $withScheme;
+            }
+            // Si no tiene host real, tratar como ruta absoluta
+            return $scheme . '://' . $host . $raw;
+        }
+        if (str_starts_with($raw, '/')) {
+            // Algunos sitios mal­forman el og:image con una / inicial antes de https://
+            // Ejemplo: "/https://cdn.example.com/img.jpg"
+            $stripped = ltrim($raw, '/');
+            if (str_starts_with($stripped, 'http://') || str_starts_with($stripped, 'https://')) {
+                return $stripped;
+            }
+            // Ruta absoluta estándar: añadir esquema + host
+            return $scheme . '://' . $host . $raw;
+        }
+
+        // Ruta relativa sin / inicial: demasiado ambigua, descartar
+        return null;
     }
 
     /**

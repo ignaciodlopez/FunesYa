@@ -28,6 +28,64 @@ document.addEventListener('DOMContentLoaded', () => {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
 
+    const FALLBACK_IMG = 'https://images.unsplash.com/photo-1495020689067-958852a7765e?q=80&w=600&auto=format&fit=crop';
+
+    /**
+     * Dominios con hotlink protection activa.
+     * Estacionline devuelve 403; La Voz de Funes y otros WordPress devuelven 200
+     * con una imagen de "acceso denegado", por lo que onerror nunca dispara.
+     * Para estos dominios se usa el proxy directamente, sin esperar al fallo.
+     */
+    const PROXY_DOMAINS = [
+        'lavozdefunes.com.ar',
+        'estacionline.com',
+        'funeshoy.com.ar',
+        'eloccidental.com.ar',
+        'fmdiezfunes.com.ar',
+    ];
+
+    /**
+     * Devuelve la URL del proxy para una imagen externa.
+     * @param {string} url - URL original de la imagen.
+     * @returns {string}
+     */
+    const proxyUrl = (url) => `api/img.php?url=${encodeURIComponent(url)}`;
+
+    /**
+     * Devuelve la URL a usar para cargar una imagen.
+     * Si el dominio tiene hotlink protection conocida, usa el proxy directamente.
+     * De lo contrario usa la URL directa (más rápido, sin overhead).
+     * @param {string} url - URL original de la imagen.
+     * @returns {string}
+     */
+    const resolveImgSrc = (url) => {
+        try {
+            const host = new URL(url).hostname;
+            if (PROXY_DOMAINS.some(d => host === d || host.endsWith('.' + d))) {
+                return proxyUrl(url);
+            }
+        } catch (_) { /* URL inválida: usar directa */ }
+        return url;
+    };
+
+    /**
+     * Adjunta el handler de error a un <img>:
+     * Si la carga directa falla → proxy PHP → fallback Unsplash.
+     * @param {HTMLImageElement} img        - Elemento imagen.
+     * @param {string}           originalSrc - URL original de la imagen.
+     */
+    const attachImgFallback = (img, originalSrc) => {
+        img.onerror = () => {
+            const px = proxyUrl(originalSrc);
+            if (img.src !== px) {
+                img.src = px;
+            } else {
+                img.onerror = null;
+                img.src = FALLBACK_IMG;
+            }
+        };
+    };
+
     /**
      * Crea un elemento <article> de tarjeta de noticia listo para insertar en el DOM.
      * @param {Object}  item  - Objeto noticia proveniente de la API.
@@ -37,10 +95,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const createCard = (item, isNew = false) => {
         const card = document.createElement('article');
         card.className = `news-card${isNew ? ' new-card' : ''}`;
+        const imgSrc = resolveImgSrc(item.image_url);
         card.innerHTML = `
             <div class="card-img-wrapper">
-                <img src="${escHtml(item.image_url)}" alt="${escHtml(item.title)}" loading="lazy"
-                     onerror="this.src='https://images.unsplash.com/photo-1495020689067-958852a7765e?q=80&w=600&auto=format&fit=crop'">
+                <img src="${escHtml(imgSrc)}" alt="${escHtml(item.title)}" loading="lazy">
                 <span class="card-source">${escHtml(item.source)}</span>
             </div>
             <div class="card-content">
@@ -51,6 +109,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
             </div>
         `;
+        attachImgFallback(card.querySelector('img'), item.image_url);
         return card;
     };
 

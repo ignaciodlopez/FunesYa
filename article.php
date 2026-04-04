@@ -22,7 +22,22 @@ if (!$article) {
 $title        = htmlspecialchars($article['title'], ENT_QUOTES, 'UTF-8');
 $source       = htmlspecialchars($article['source'], ENT_QUOTES, 'UTF-8');
 $pubDate      = date('d \d\e F \d\e Y, H:i', strtotime($article['pub_date']));
-$imageUrl     = htmlspecialchars($article['image_url'] ?? '', ENT_QUOTES, 'UTF-8');
+// Dominios con hotlink protection: usar proxy para no recibir imagen de acceso denegado
+const PROXY_DOMAINS = [
+    'lavozdefunes.com.ar',
+    'estacionline.com',
+    'funeshoy.com.ar',
+    'eloccidental.com.ar',
+    'fmdiezfunes.com.ar',
+];
+
+$rawImageUrl  = $article['image_url'] ?? '';
+$imageHost    = strtolower(parse_url($rawImageUrl, PHP_URL_HOST) ?? '');
+$needsProxy   = array_reduce(PROXY_DOMAINS, fn($carry, $d) =>
+    $carry || $imageHost === $d || str_ends_with($imageHost, '.' . $d), false);
+$imageUrl     = $needsProxy
+    ? 'api/img.php?url=' . urlencode($rawImageUrl)
+    : htmlspecialchars($rawImageUrl, ENT_QUOTES, 'UTF-8');
 
 // Validar que el enlace externo use un esquema seguro (http/https)
 // para prevenir inyección de URLs tipo javascript: o data:
