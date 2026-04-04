@@ -47,11 +47,15 @@ $externalLink = in_array($parsedScheme, ['http', 'https'], true)
     ? htmlspecialchars($rawLink, ENT_QUOTES, 'UTF-8')
     : htmlspecialchars('index.php', ENT_QUOTES, 'UTF-8');
 
-// Usar descripción guardada o generarla con IA si es un snippet de RSS o no existe
-$rawSummary = $article['description'];
+// Usar descripción guardada o generarla con IA si es un snippet de RSS o no existe.
+// Se limpia description antes de pasar a getSummary() cuando es un snippet,
+// para que el summarizer no lo retorne early y sí llame a Gemini.
+$rawSummary   = $article['description'];
 $isRssSnippet = $rawSummary && str_ends_with(rtrim($rawSummary), '...');
 if ((!$rawSummary || $isRssSnippet) && !str_starts_with($article['link'], 'https://example.com')) {
-    $rawSummary = (new ArticleSummarizer($db))->getSummary($article) ?? $rawSummary;
+    $articleForSummary                = $article;
+    $articleForSummary['description'] = null; // forzar que getSummary() llame a Gemini
+    $rawSummary = (new ArticleSummarizer($db))->getSummary($articleForSummary) ?? $rawSummary;
 }
 
 $summaryParagraphs = [];
