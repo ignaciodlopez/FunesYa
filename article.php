@@ -23,7 +23,14 @@ $title        = htmlspecialchars($article['title'], ENT_QUOTES, 'UTF-8');
 $source       = htmlspecialchars($article['source'], ENT_QUOTES, 'UTF-8');
 $pubDate      = date('d \d\e F \d\e Y, H:i', strtotime($article['pub_date']));
 $imageUrl     = htmlspecialchars($article['image_url'] ?? '', ENT_QUOTES, 'UTF-8');
-$externalLink = htmlspecialchars($article['link'], ENT_QUOTES, 'UTF-8');
+
+// Validar que el enlace externo use un esquema seguro (http/https)
+// para prevenir inyección de URLs tipo javascript: o data:
+$rawLink      = $article['link'];
+$parsedScheme = strtolower(parse_url($rawLink, PHP_URL_SCHEME) ?? '');
+$externalLink = in_array($parsedScheme, ['http', 'https'], true)
+    ? htmlspecialchars($rawLink, ENT_QUOTES, 'UTF-8')
+    : htmlspecialchars('index.php', ENT_QUOTES, 'UTF-8');
 
 // Usar descripción guardada o generarla con IA si es un snippet de RSS o no existe
 $rawSummary = $article['description'];

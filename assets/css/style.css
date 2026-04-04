@@ -95,11 +95,16 @@ a {
     font-weight: 600;
     font-size: 0.9rem;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: color 0.3s ease, background-color 0.3s ease;
 }
 
 .pill:hover {
     color: var(--text-primary);
+}
+
+.pill:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
 }
 
 .pill.active {
@@ -118,13 +123,18 @@ a {
     justify-content: center;
     align-items: center;
     border-radius: 50%;
-    transition: all 0.3s ease;
+    transition: color 0.3s ease, background-color 0.3s ease, transform 0.3s ease;
 }
 
 .icon-btn:hover {
     color: var(--text-primary);
     background: var(--card-bg);
     transform: rotate(30deg);
+}
+
+.icon-btn:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
 }
 
 .icon-btn svg {
@@ -165,6 +175,11 @@ main {
     transform: translateY(-5px);
     border-color: rgba(0, 212, 255, 0.3);
     box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
+}
+
+.news-card:focus-within {
+    border-color: rgba(0, 212, 255, 0.3);
+    box-shadow: 0 0 0 2px var(--accent-color);
 }
 
 /* Imagen de la tarjeta (relación de aspecto 16:9) */
@@ -250,6 +265,12 @@ main {
 
 .read-more:hover {
     color: var(--accent-hover);
+}
+
+.read-more:focus-visible {
+    outline: 2px solid var(--accent-color);
+    outline-offset: 2px;
+    border-radius: 2px;
 }
 
 .read-more::after {
@@ -397,9 +418,23 @@ footer {
         flex-direction: column;
         gap: 15px;
     }
-    
+
     .pill-nav {
         flex-wrap: wrap;
         justify-content: center;
+    }
+}
+
+/* ═══════════════════════════════════════
+   Accesibilidad: reducir movimiento
+   ══════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
     }
 }

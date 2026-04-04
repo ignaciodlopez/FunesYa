@@ -1,0 +1,3 @@
+# Bloquear acceso web directo a los scripts de mantenimiento.
+# Estos scripts solo deben ejecutarse desde la línea de comandos (CLI).
+Require all denied

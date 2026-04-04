@@ -69,7 +69,7 @@ class ArticleSummarizer
                 'user_agent'      => 'FunesNewsAgent/1.0',
                 'follow_location' => 1,
             ],
-            'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
         ]);
 
         $html = @file_get_contents($url, false, $ctx);
@@ -132,7 +132,7 @@ class ArticleSummarizer
                 'content' => $body,
                 'timeout' => self::GEMINI_TIMEOUT,
             ],
-            'ssl' => ['verify_peer' => false, 'verify_peer_name' => false],
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
         ]);
 
         $response = @file_get_contents($endpoint, false, $ctx);

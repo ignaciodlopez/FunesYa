@@ -1,0 +1,32 @@
+# ──────────────────────────────────────────────
+# Seguridad: proteger archivos y directorios
+# sensibles de acceso directo desde el navegador.
+# ──────────────────────────────────────────────
+
+# Bloquear acceso al archivo .env
+<Files ".env">
+    Require all denied
+</Files>
+
+# Bloquear acceso a cualquier archivo .sqlite/.db
+<FilesMatch "\.(sqlite|sqlite3|db)$">
+    Require all denied
+</FilesMatch>
+
+# Bloquear acceso a archivos de lock
+<FilesMatch "\.lock$">
+    Require all denied
+</FilesMatch>
+
+# Bloquear listado de directorios
+Options -Indexes
+
+# ──────────────────────────────────────────────
+# Headers de seguridad HTTP globales
+# ──────────────────────────────────────────────
+<IfModule mod_headers.c>
+    Header always set X-Content-Type-Options "nosniff"
+    Header always set X-Frame-Options "SAMEORIGIN"
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+</IfModule>

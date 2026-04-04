@@ -78,15 +78,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 urlParams += `&source=${encodeURIComponent(currentSource)}`;
             }
             const url = `api/news.php${urlParams}`;
-            
+
             const res = await fetch(url);
+            if (!res.ok) {
+                throw new Error(`Error HTTP: ${res.status}`);
+            }
             const jsonData = await res.json();
 
             if (jsonData.status === 'success') {
                 lastKnownUpdate = jsonData.last_update;
                 updateFilters(jsonData.sources);
                 renderNews(jsonData.data, page === 1);
-                
+
                 currentPage = jsonData.page;
 
                 if (jsonData.has_more) {
@@ -95,13 +98,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     loadMoreContainer.classList.add('hidden');
                 }
             } else {
-                console.error("Error from API:", jsonData.message);
-                if (page === 1) newsContainer.innerHTML = `<p class="error">Error loading news: ${jsonData.message}</p>`;
+                console.error('Error from API:', jsonData.message);
+                if (page === 1) newsContainer.innerHTML = '<p class="error">No se pudieron cargar las noticias. Intente nuevamente.</p>';
             }
         } catch (error) {
-            console.error("Networking Error:", error);
+            console.error('Networking Error:', error);
             if (newsContainer.innerHTML.trim() === '') {
-                 newsContainer.innerHTML = '<p class="error">Error fetching data. Check tu conexión o asegúrate que el servidor PHP esté iniciado.</p>';
+                newsContainer.innerHTML = '<p class="error">Error al obtener las noticias. Verifique su conexión o que el servidor PHP esté activo.</p>';
             }
         } finally {
             loader.classList.add('hidden');
@@ -237,6 +240,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     urlParams += `&source=${encodeURIComponent(currentSource)}`;
                 }
                 const res = await fetch(`api/news.php${urlParams}`);
+                if (!res.ok) return;
                 const jsonData = await res.json();
 
                 // Si no hubo cambios desde la última consulta, no hacer nada

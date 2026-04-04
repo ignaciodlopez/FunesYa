@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FunesNews - Tu portal de noticias locales</title>
-    <meta name="description" content="Las últimas noticias de la ciudad de Funes, Santa Fe. Se actualiza cada 5 minutos de múltiples fuentes locales.">
+    <meta name="description" content="Las últimas noticias de la ciudad de Funes, Santa Fe. Se actualiza cada 2 minutos de múltiples fuentes locales.">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -78,7 +78,7 @@
     <!-- Pie de página del sitio -->
     <footer>
         <div class="container text-center">
-            <p>FunesNews &copy; 2026. Actualizado cada 5 minutos.</p>
+            <p>FunesNews &copy; 2026. Noticias en tiempo real.</p>
         </div>
     </footer>
 

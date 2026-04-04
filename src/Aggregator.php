@@ -62,16 +62,16 @@ class Aggregator {
         $items = [];
         $ctx = stream_context_create([
             'http' => ['timeout' => 5, 'user_agent' => 'FunesNewsAgent/1.0'],
-            'ssl' => ['verify_peer' => false, 'verify_peer_name' => false]
+            'ssl'  => ['verify_peer' => true, 'verify_peer_name' => true],
         ]);
-        
+
         $rssContent = @file_get_contents($url, false, $ctx);
         if (!$rssContent) {
             return $this->getMockData($sourceName);
         }
 
         try {
-            $xml = @simplexml_load_string($rssContent);
+            $xml = simplexml_load_string($rssContent);
             if ($xml && isset($xml->channel->item)) {
                 foreach ($xml->channel->item as $item) {
                     $image = $this->extractImage($item);
@@ -164,7 +164,7 @@ class Aggregator {
     private function scrapeHtmlPage(string $url, string $sourceName): array {
         $ctx = stream_context_create([
             'http' => ['timeout' => 8, 'user_agent' => 'FunesNewsAgent/1.0'],
-            'ssl'  => ['verify_peer' => false, 'verify_peer_name' => false]
+            'ssl'  => ['verify_peer' => true, 'verify_peer_name' => true],
         ]);
 
         $html = @file_get_contents($url, false, $ctx);
