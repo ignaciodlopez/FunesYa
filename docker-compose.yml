@@ -1,0 +1,11 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8080:80"
+    volumes:
+      # Persistir la base de datos SQLite y la caché de imágenes entre reinicios
+      - ./data:/var/www/html/data
+    env_file:
+      - .env
+    restart: unless-stopped

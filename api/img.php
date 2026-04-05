@@ -37,6 +37,12 @@ $cacheDir = __DIR__ . '/../data/img_cache';
 
 $rawUrl = $_GET['url'] ?? '';
 
+// PHP decodifica los parámetros GET, por lo que la URL puede contener caracteres
+// no-ASCII en crudo (ej: U+200E LRM en el path). filter_var los rechaza, pero
+// file_get_contents los necesita percent-encoded para localizar el archivo remoto.
+// Solución: re-codificar cada byte no-ASCII como %XX.
+$rawUrl = preg_replace_callback('/[^\x00-\x7F]+/', fn($m) => rawurlencode($m[0]), $rawUrl);
+
 if ($rawUrl === '' || !filter_var($rawUrl, FILTER_VALIDATE_URL)) {
     http_response_code(400);
     exit;

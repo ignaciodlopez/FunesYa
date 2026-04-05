@@ -26,9 +26,12 @@ try {
         $lastUpdate = $db->getLastUpdate(); // Actualizar valor local tras el cambio
         $script = realpath(__DIR__ . '/../scripts/run_aggregator.php');
         if ($script !== false) {
-            // Windows: start /b lanza el proceso sin bloquear
             $php = PHP_BINARY;
-            pclose(popen("cmd /c start /b \"\" \"{$php}\" \"{$script}\" > NUL 2>&1", 'r'));
+            if (PHP_OS_FAMILY === 'Windows') {
+                pclose(popen("cmd /c start /b \"\" \"{$php}\" \"{$script}\" > NUL 2>&1", 'r'));
+            } else {
+                exec(escapeshellcmd($php) . ' ' . escapeshellarg($script) . ' > /dev/null 2>&1 &');
+            }
         }
     }
 
