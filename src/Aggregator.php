@@ -7,6 +7,12 @@ declare(strict_types=1);
  */
 class Aggregator {
     private Database $db;
+    private string $logFile;
+
+    private function log(string $message): void {
+        $line = '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL;
+        file_put_contents($this->logFile, $line, FILE_APPEND | LOCK_EX);
+    }
 
     /** @var array<string, string> Feeds RSS indexados por nombre del medio */
     private $feeds = [
@@ -25,6 +31,7 @@ class Aggregator {
     /** @param Database $db Instancia de la base de datos para persistir las noticias obtenidas */
     public function __construct(Database $db) {
         $this->db = $db;
+        $this->logFile = __DIR__ . '/../data/aggregator.log';
     }
 
     /**
@@ -33,7 +40,8 @@ class Aggregator {
      */
     public function fetchAll(): void {
         $newsList = [];
-        
+        $this->log('--- Inicio ciclo de actualización ---');
+
         foreach ($this->feeds as $name => $url) {
             $feedItems = $this->parseFeed($url, $name);
             $newsList = array_merge($newsList, $feedItems);
@@ -48,6 +56,8 @@ class Aggregator {
             $newsList = $this->deduplicateItems($newsList);
             $this->db->saveNews($newsList);
         }
+
+        $this->log('Total artículos procesados: ' . count($newsList));
         
         $this->db->setLastUpdate(time());
     }
@@ -126,12 +136,14 @@ class Aggregator {
 
         $rssContent = @file_get_contents($url, false, $ctx);
         if (!$rssContent) {
+            $this->log("[ERROR] {$sourceName}: no se pudo descargar el feed ({$url})");
             return $this->getMockData($sourceName);
         }
 
         try {
             $xml = simplexml_load_string($rssContent);
             if ($xml && isset($xml->channel->item)) {
+                $this->log("[OK] {$sourceName}: feed descargado correctamente");
                 foreach ($xml->channel->item as $item) {
                     $image = $this->extractImage($item);
                     $pubDateStr = (string)$item->pubDate;
@@ -154,9 +166,11 @@ class Aggregator {
                     ];
                 }
             } else {
+                $this->log("[WARN] {$sourceName}: feed inválido o sin ítems");
                 return $this->getMockData($sourceName);
             }
         } catch (Exception $e) {
+            $this->log("[ERROR] {$sourceName}: excepción al parsear — " . $e->getMessage());
             return $this->getMockData($sourceName);
         }
 
@@ -242,7 +256,11 @@ class Aggregator {
         ]);
 
         $html = @file_get_contents($url, false, $ctx);
-        if (!$html) return $this->getMockData($sourceName);
+        if (!$html) {
+            $this->log("[ERROR] {$sourceName}: no se pudo descargar la página ({$url})");
+            return $this->getMockData($sourceName);
+        }
+        $this->log("[OK] {$sourceName}: página descargada correctamente");
 
         // Extraer base URL para resolver links relativos
         $parsed  = parse_url($url);
