@@ -245,7 +245,7 @@ if ($rawSummary) {
 
     <footer>
         <div class="container text-center" style="padding: 20px 0; color: var(--text-secondary); font-size: .8rem;">
-            <p>FunesNews &copy; <?= date('Y') ?>. Noticias en tiempo real.</p>
+            <p>FunesNews &copy; <?= date('Y') ?>. Noticias en tiempo real</p>
         </div>
     </footer>
 </body>
