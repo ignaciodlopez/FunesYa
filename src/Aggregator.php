@@ -60,12 +60,39 @@ class Aggregator {
         $saved = 0;
         if (!empty($newsList)) {
             $newsList = $this->deduplicateItems($newsList);
+            $newsList = $this->removeSiteWideImages($newsList);
             $saved = $this->db->saveNews($newsList);
         }
 
         $this->log('Procesados: ' . count($newsList) . ', nuevos guardados: ' . $saved);
         
         $this->db->setLastUpdate(time());
+    }
+
+    /**
+     * Reemplaza con placeholder Picsum las imágenes que aparecen en 2+ artículos
+     * de la misma fuente dentro del mismo ciclo — señal de imagen genérica del sitio.
+     */
+    private function removeSiteWideImages(array $items): array {
+        // Contar frecuencia de cada imagen por fuente
+        $freq = [];
+        foreach ($items as $item) {
+            $url = $item['image_url'] ?? '';
+            if ($url === '' || str_contains($url, 'picsum.photos')) continue;
+            $freq[$item['source']][$url] = ($freq[$item['source']][$url] ?? 0) + 1;
+        }
+
+        foreach ($items as &$item) {
+            $url = $item['image_url'] ?? '';
+            if ($url === '' || str_contains($url, 'picsum.photos')) continue;
+            if (($freq[$item['source']][$url] ?? 0) >= 2) {
+                $seed = substr(md5($item['link']), 0, 8);
+                $item['image_url'] = "https://picsum.photos/seed/{$seed}/600/400";
+            }
+        }
+        unset($item);
+
+        return $items;
     }
 
     /**
@@ -233,23 +260,27 @@ class Aggregator {
             if ($url !== '' && str_starts_with($url, 'http') && stripos($url, '.gif') === false) return $url;
         }
 
-        // 3º: primer <img> en content:encoded
+        // 3º: primer <img> en content:encoded (excluyendo contenedores de anuncios)
         $content = $item->children('content', true);
         if (isset($content->encoded)) {
-            if (preg_match_all('/<img[^>]+src=["\']([^"\']+)["\']/i', (string)$content->encoded, $matches)) {
+            $encodedHtml = (string)$content->encoded;
+            // Eliminar bloques de publicidad antes de buscar imágenes
+            $encodedHtml = preg_replace('/<div[^>]+class="[^"]*(?:estac-entity-placement|estac-anuncio|advertisement|ad-container)[^"]*"[^>]*>.*?<\/div>\s*<\/div>/si', '', $encodedHtml);
+            if (preg_match_all('/<img[^>]+src=["\']([^"\']+)["\']/i', $encodedHtml, $matches)) {
                 foreach ($matches[1] as $imgUrl) {
                     $imgUrl = html_entity_decode($imgUrl, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                    if (stripos($imgUrl, '.gif') === false) return $imgUrl;
+                    if (stripos($imgUrl, '.gif') === false && !$this->isAdImage($imgUrl)) return $imgUrl;
                 }
             }
         }
 
-        // 4º: primer <img> en la descripción del ítem
+        // 4º: primer <img> en la descripción del ítem (excluyendo anuncios)
         $rawDesc = (string)$item->description;
+        $rawDesc = preg_replace('/<div[^>]+class="[^"]*(?:estac-entity-placement|estac-anuncio|advertisement|ad-container)[^"]*"[^>]*>.*?<\/div>\s*<\/div>/si', '', $rawDesc);
         if (preg_match_all('/<img[^>]+src=["\']([^"\']+)["\']/i', $rawDesc, $matches)) {
             foreach ($matches[1] as $imgUrl) {
                 $imgUrl = html_entity_decode($imgUrl, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-                if (stripos($imgUrl, '.gif') === false) return $imgUrl;
+                if (stripos($imgUrl, '.gif') === false && !$this->isAdImage($imgUrl)) return $imgUrl;
             }
         }
 
@@ -264,6 +295,19 @@ class Aggregator {
         // Último recurso: placeholder único generado con Picsum
         $seed = substr(md5($link), 0, 8);
         return "https://picsum.photos/seed/{$seed}/600/400";
+    }
+
+    /**
+     * Detecta si una URL de imagen corresponde a un banner publicitario.
+     * Filtra patrones comunes de nombres de archivo de anuncios.
+     */
+    private function isAdImage(string $url): bool {
+        $lower = strtolower(basename(parse_url($url, PHP_URL_PATH) ?? ''));
+        $adPatterns = ['banner', 'pauta', 'publicidad', 'anuncio', 'sponsor', 'propaganda', 'aviso'];
+        foreach ($adPatterns as $pattern) {
+            if (str_contains($lower, $pattern)) return true;
+        }
+        return false;
     }
 
     /**
@@ -416,25 +460,31 @@ class Aggregator {
             return null;
         }
 
-        // Solo procesar el <head> (primeros 15 KB) para mayor eficiencia
+        $parsed = parse_url($url);
+        $scheme = $parsed['scheme'] ?? 'https';
+        $host   = $parsed['host']   ?? '';
+
+        // 1º: wp-post-image (imagen destacada de WordPress) — más confiable que og:image
+        //     ya que siempre es la imagen del artículo, nunca el logo del sitio
+        if (preg_match('/<img[^>]+class=["\'][^"\']*wp-post-image[^"\']*["\'][^>]+src=["\']([^"\']+)["\']/i', $html, $m) ||
+            preg_match('/<img[^>]+src=["\']([^"\']+)["\'][^>]+class=["\'][^"\']*wp-post-image[^"\']*["\']/i', $html, $m)) {
+            $raw = html_entity_decode(trim($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            if ($raw !== '' && stripos($raw, '.gif') === false) {
+                return $this->resolveImageUrl($raw, $scheme, $host);
+            }
+        }
+
+        // 2º: og:image / twitter:image del <head>
         $head = substr($html, 0, 15000);
+        $raw  = null;
 
-        $raw = null;
-
-        // og:image — property antes de content
         if (preg_match('/<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)["\']/i', $head, $m)) {
             $raw = trim($m[1]);
-        }
-        // og:image — content antes de property
-        elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']/i', $head, $m)) {
+        } elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image["\']/i', $head, $m)) {
             $raw = trim($m[1]);
-        }
-        // twitter:image — name/property antes de content
-        elseif (preg_match('/<meta[^>]+(?:name|property)=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']/i', $head, $m)) {
+        } elseif (preg_match('/<meta[^>]+(?:name|property)=["\']twitter:image["\'][^>]+content=["\']([^"\']+)["\']/i', $head, $m)) {
             $raw = trim($m[1]);
-        }
-        // twitter:image — content antes de name/property
-        elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']twitter:image["\']/i', $head, $m)) {
+        } elseif (preg_match('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']twitter:image["\']/i', $head, $m)) {
             $raw = trim($m[1]);
         }
 
@@ -442,37 +492,30 @@ class Aggregator {
             return null;
         }
 
-        // Resolver URLs relativas contra la URL base del artículo
-        $parsed = parse_url($url);
-        $scheme = $parsed['scheme'] ?? 'https';
-        $host   = $parsed['host']   ?? '';
+        return $this->resolveImageUrl($raw, $scheme, $host);
+    }
 
+    private function resolveImageUrl(string $raw, string $scheme, string $host): ?string
+    {
         if (str_starts_with($raw, 'http://') || str_starts_with($raw, 'https://')) {
-            // URL absoluta: usar tal cual
             return $raw;
         }
         if (str_starts_with($raw, '//')) {
-            // Protocol-relative: verificar que el host sea real (tiene punto)
             $withScheme = $scheme . ':' . $raw;
             $parsedImg  = parse_url($withScheme);
             if (isset($parsedImg['host']) && str_contains($parsedImg['host'], '.')) {
                 return $withScheme;
             }
-            // Si no tiene host real, tratar como ruta absoluta
             return $scheme . '://' . $host . $raw;
         }
         if (str_starts_with($raw, '/')) {
-            // Algunos sitios mal­forman el og:image con una / inicial antes de https://
-            // Ejemplo: "/https://cdn.example.com/img.jpg"
             $stripped = ltrim($raw, '/');
             if (str_starts_with($stripped, 'http://') || str_starts_with($stripped, 'https://')) {
                 return $stripped;
             }
-            // Ruta absoluta estándar: añadir esquema + host
             return $scheme . '://' . $host . $raw;
         }
 
-        // Ruta relativa sin / inicial: demasiado ambigua, descartar
         return null;
     }
 
