@@ -1,5 +1,5 @@
 /**
- * Lógica principal del frontend de FunesNews.
+ * Lógica principal del frontend de FunesYa.
  * Consume la API REST, renderiza tarjetas de noticias,
  * gestiona filtros por fuente y detecta noticias nuevas en tiempo real.
  */

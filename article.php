@@ -81,7 +81,7 @@ if ($rawSummary) {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><?= $title ?> — FunesNews</title>
+    <title><?= $title ?> — FunesYa</title>
     <meta name="description" content="<?= $summaryParagraphs[0] ?? $title ?>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -196,7 +196,7 @@ if ($rawSummary) {
     <header class="navbar">
         <div class="container navbar-content">
             <a href="index.php" class="logo" style="text-decoration:none;">
-                Funes<span class="highlight">News</span>
+                Funes<span class="highlight">Ya</span>
             </a>
         </div>
     </header>
@@ -253,7 +253,7 @@ if ($rawSummary) {
 
     <footer>
         <div class="container text-center" style="padding: 20px 0; color: var(--text-secondary); font-size: .8rem;">
-            <p>FunesNews &copy; <?= date('Y') ?>. Noticias en tiempo real.</p>
+            <p>FunesYa &copy; <?= date('Y') ?>. Noticias en tiempo real.</p>
         </div>
     </footer>
 </body>

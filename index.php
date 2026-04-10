@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FunesNews - Tu portal de noticias locales</title>
+    <title>FunesYa - Tu portal de noticias locales</title>
     <meta name="description" content="Las últimas noticias de la ciudad de Funes, Santa Fe. Se actualiza cada 2 minutos de múltiples fuentes locales.">
     <!-- Google Fonts: carga asíncrona para no bloquear el render (FCP) -->
     <!-- preconnect reduce la latencia DNS+TCP+TLS antes de que el CSS las solicite -->
@@ -24,7 +24,7 @@
     <!-- Premium Dark Header -->
     <header class="navbar">
         <div class="container navbar-content">
-            <h1 class="logo">Funes<span class="highlight">News</span></h1>
+            <h1 class="logo">Funes<span class="highlight">Ya</span></h1>
             <nav>
                 <div class="pill-nav" id="source-filters">
                     <button class="pill active" data-source="Todas">Todas</button>
@@ -86,7 +86,7 @@
     <!-- Pie de página del sitio -->
     <footer>
         <div class="container text-center">
-            <p>FunesNews &copy; <?= date('Y') ?>. Noticias en tiempo real.</p>
+            <p>FunesYa &copy; <?= date('Y') ?>. Noticias en tiempo real.</p>
         </div>
     </footer>
 

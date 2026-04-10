@@ -27,8 +27,8 @@ RUN mkdir -p /var/www/html/data/img_cache \
 # Cron job: ejecuta el aggregator cada 2 minutos como www-data
 # El script ya tiene flock() para evitar ejecuciones simultáneas
 RUN echo "*/2 * * * * www-data /usr/local/bin/php /var/www/html/scripts/run_aggregator.php >> /var/www/html/data/aggregator.log 2>&1" \
-        > /etc/cron.d/funesnews \
-    && chmod 0644 /etc/cron.d/funesnews
+        > /etc/cron.d/funesya \
+    && chmod 0644 /etc/cron.d/funesya
 
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh

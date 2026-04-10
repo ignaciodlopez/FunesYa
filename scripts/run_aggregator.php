@@ -15,7 +15,7 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 
-$lockFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'funesnews-aggregator.lock';
+$lockFile = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR) . DIRECTORY_SEPARATOR . 'funesya-aggregator.lock';
 
 // Abrir (o crear) el archivo de lock
 $lock = fopen($lockFile, 'c');
