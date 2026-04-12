@@ -19,6 +19,14 @@
     </noscript>
     <!-- Custom CSS con cache-buster basado en fecha de modificación del archivo -->
     <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-X7JKWCEVGL"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-X7JKWCEVGL');
+    </script>
 </head>
 <body>
     <!-- Premium Dark Header -->
