@@ -66,19 +66,31 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const proxyUrl = (url) => `api/img.php?url=${encodeURIComponent(url)}&w=640`;
 
+    // Dominios con hotlink protection: la imagen directa devuelve 403 o imagen de error.
+    // Solo estos van por el proxy; el resto se sirve directo (sin overhead de caché fría).
+    const HOTLINK_DOMAINS = [
+        'lavozdefunes.com.ar', 'estacionline.com', 'flex-assets.tadevel-cdn.com',
+        'funeshoy.com.ar', 'eloccidental.com.ar', 'fmdiezfunes.com.ar',
+        'infobae.com', 'tn.com.ar', 'radiofonica.com', 'ambito.com',
+        'media.ambito.com', 'elliberador.com', 'resizer.glanacion.com',
+    ];
+
     /**
      * Devuelve la URL a usar para cargar una imagen.
-     * Si el dominio tiene hotlink protection conocida, usa el proxy directamente.
-     * De lo contrario usa la URL directa (más rápido, sin overhead).
+     * Solo usa el proxy para dominios con hotlink protection conocida.
+     * El resto se sirve directamente (más rápido, sin overhead de proxy en caché fría).
      * @param {string} url - URL original de la imagen.
      * @returns {string}
      */
     const resolveImgSrc = (url) => {
-        if (!hasUsableImage(url)) {
-            return '';
-        }
-        // Siempre usar el proxy para redimensionar a 640px y convertir a WebP
-        return proxyUrl(url);
+        if (!hasUsableImage(url)) return '';
+        try {
+            const host = new URL(url).hostname;
+            if (HOTLINK_DOMAINS.some(d => host === d || host.endsWith('.' + d))) {
+                return proxyUrl(url);
+            }
+        } catch (_) { /* URL inválida: intentar directa */ }
+        return url;
     };
 
     const getSourceInitials = (source = '') => {

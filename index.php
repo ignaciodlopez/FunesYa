@@ -6,13 +6,33 @@ require_once __DIR__ . '/src/Config.php';
 
 Config::bootstrap();
 
+// Dom. con hotlink protection - solo estos van por el proxy de imagen
+const SSR_HOTLINK_DOMAINS = [
+    'lavozdefunes.com.ar', 'estacionline.com', 'flex-assets.tadevel-cdn.com',
+    'funeshoy.com.ar', 'eloccidental.com.ar', 'fmdiezfunes.com.ar',
+    'infobae.com', 'tn.com.ar', 'radiofonica.com', 'ambito.com',
+    'media.ambito.com', 'elliberador.com', 'resizer.glanacion.com',
+];
+
 function ssrIsUsableImage(string $url): bool {
     return $url !== '' && !preg_match('~picsum\.photos|images\.unsplash\.com~i', $url);
 }
 
+function ssrNeedsProxy(string $url): bool {
+    $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+    foreach (SSR_HOTLINK_DOMAINS as $d) {
+        if ($host === $d || str_ends_with($host, '.' . $d)) return true;
+    }
+    return false;
+}
+
 function ssrResolveImgSrc(string $url, int $w = 640): string {
     if (!ssrIsUsableImage($url)) return '';
-    return 'api/img.php?url=' . urlencode($url) . ($w > 0 ? '&w=' . $w : '');
+    if (ssrNeedsProxy($url)) {
+        return 'api/img.php?url=' . urlencode($url) . '&w=' . $w;
+    }
+    // Dominio sin hotlink: URL directa (sin overhead del proxy en caché fría)
+    return htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
 }
 
 function ssrSourceInitials(string $source): string {
@@ -120,8 +140,66 @@ foreach ($ssrNews as $_item) {
     <?php if ($lcpImageUrl !== ''): ?>
     <link rel="preload" as="image" href="<?= $lcpImageUrl ?>" fetchpriority="high">
     <?php endif; ?>
-    <!-- Custom CSS con cache-buster basado en fecha de modificación del archivo -->
-    <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
+    <!-- CSS crítico inlineado: elimina el request bloqueante de render para el CSS completo.
+         Contiene solo los estilos necesarios para el contenido visible inicial (above-the-fold).
+         El CSS completo se carga de forma asíncrona abajo. -->
+    <style>
+    :root{--bg-color:#0f1115;--card-bg:#161920;--card-border:#222630;--text-primary:#f0f2f5;--text-secondary:#8b92a5;--accent-color:#00d4ff;--gradient:linear-gradient(135deg,#00d4ff 0%,#0070f3 100%);--font-heading:'Outfit',sans-serif;--font-body:'Inter',sans-serif}
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{background-color:var(--bg-color);color:var(--text-primary);font-family:var(--font-body);-webkit-font-smoothing:antialiased;line-height:1.5}
+    a{text-decoration:none;color:inherit}
+    .container{max-width:1200px;margin:0 auto;padding:0 20px}
+    .navbar{background:rgba(15,17,21,.8);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);position:sticky;top:0;z-index:100;border-bottom:1px solid var(--card-border);padding:15px 0}
+    .navbar-content{display:flex;justify-content:space-between;align-items:center}
+    .logo{font-family:var(--font-heading);font-weight:700;font-size:1.5rem;letter-spacing:-.5px}
+    .logo .highlight{background:var(--gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+    .pill-nav{display:flex;gap:10px;background:var(--card-bg);padding:5px;border-radius:30px;border:1px solid var(--card-border)}
+    .pill{background:transparent;border:none;color:var(--text-secondary);padding:8px 16px;border-radius:20px;font-family:var(--font-body);font-weight:600;font-size:.9rem;cursor:pointer}
+    .pill.active{background:var(--text-primary);color:var(--bg-color)}
+    .icon-btn{background:none;border:none;color:var(--text-secondary);cursor:pointer;width:36px;height:36px;display:flex;justify-content:center;align-items:center;border-radius:50%}
+    .icon-btn svg{width:20px;height:20px}
+    main{padding:40px 0;min-height:80vh}
+    .news-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:25px}
+    .news-card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;content-visibility:auto;contain-intrinsic-size:320px 400px}
+    .card-img-wrapper{position:relative;width:100%;padding-top:56.25%;overflow:hidden}
+    .card-img-wrapper img{position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover}
+    .card-img-wrapper.no-image{background:linear-gradient(180deg,rgba(15,23,42,.96),rgba(12,18,30,.92))}
+    .card-media-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:22px;text-align:center}
+    .card-media-glyph{width:48px;height:48px;display:flex;align-items:center;justify-content:center;border-radius:999px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06);color:var(--text-primary);font-family:var(--font-heading);font-weight:600;font-size:.95rem;letter-spacing:.06em}
+    .card-media-text{font-size:.68rem;font-weight:500;letter-spacing:.1em;text-transform:uppercase;color:var(--text-secondary)}
+    .card-source{position:absolute;top:15px;left:15px;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);padding:4px 10px;border-radius:4px;font-size:.75rem;font-weight:700;text-transform:uppercase;letter-spacing:.5px}
+    .card-content{padding:20px;display:flex;flex-direction:column;flex-grow:1}
+    .card-title{font-family:var(--font-heading);font-size:1.25rem;font-weight:600;margin-bottom:15px;line-height:1.3;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+    .card-footer{margin-top:auto;display:flex;justify-content:space-between;align-items:center;border-top:1px solid var(--card-border);padding-top:15px}
+    .card-date{font-size:.85rem;color:var(--text-secondary)}
+    .read-more{font-size:.9rem;font-weight:600;color:var(--accent-color);display:inline-flex;align-items:center;gap:4px}
+    .read-more::after{content:'→'}
+    .loader.hidden,.load-more-container.hidden{display:none}
+    @media(max-width:768px){
+      .navbar{padding:10px 0}
+      .navbar-content{display:grid;grid-template-areas:"logo actions" "nav nav";grid-template-columns:1fr auto;align-items:center;gap:10px}
+      .logo{grid-area:logo}nav{grid-area:nav}.actions{grid-area:actions}
+      .pill-nav{overflow-x:auto;flex-wrap:nowrap;justify-content:flex-start;scrollbar-width:none}
+      .pill-nav::-webkit-scrollbar{display:none}
+      .pill{flex-shrink:0;padding:10px 18px}
+      .icon-btn{width:40px;height:40px}
+      main{padding:20px 0 40px}
+      .news-grid{gap:14px}
+      .card-content{padding:14px 16px}
+      .card-title{font-size:1.05rem;margin-bottom:10px}
+      .card-footer{padding-top:10px}
+      .card-date{font-size:.8rem}
+    }
+    @media(max-width:400px){
+      .container{padding:0 12px}.logo{font-size:1.3rem}
+      .news-grid{grid-template-columns:1fr}
+      .pill{padding:9px 14px;font-size:.82rem}
+    }
+    </style>
+    <!-- CSS completo: carga asíncrona (no bloqueante) para efectos hover, animaciones, footer, etc. -->
+    <?php $cssV = filemtime(__DIR__ . '/assets/css/style.css'); ?>
+    <link rel="preload" as="style" href="assets/css/style.css?v=<?= $cssV ?>" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="assets/css/style.css?v=<?= $cssV ?>"></noscript>
     <!-- Google Analytics: cargado después del evento load para no bloquear FCP/LCP/TBT -->
     <script>
     window.addEventListener('load', function () {

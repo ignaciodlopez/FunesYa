@@ -117,8 +117,11 @@ $metaDescriptionEsc = htmlspecialchars($metaDescription, ENT_QUOTES, 'UTF-8');
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="assets/css/style.css">
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@400;600;700&display=optional" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@400;600;700&display=optional"></noscript>
+    <?php $cssV = filemtime(__DIR__ . '/assets/css/style.css'); ?>
+    <link rel="preload" as="style" href="assets/css/style.css?v=<?= $cssV ?>" onload="this.onload=null;this.rel='stylesheet'">
+    <noscript><link rel="stylesheet" href="assets/css/style.css?v=<?= $cssV ?>"></noscript>
     <!-- Google Analytics: cargado después del evento load para no bloquear FCP/LCP/TBT -->
     <script>
     window.addEventListener('load', function () {
