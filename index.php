@@ -1,3 +1,68 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/src/Database.php';
+require_once __DIR__ . '/src/Config.php';
+
+Config::bootstrap();
+
+// Dominios con hotlink protection: las imágenes se sirven vía proxy
+const SSR_PROXY_DOMAINS = [
+    'lavozdefunes.com.ar', 'estacionline.com', 'flex-assets.tadevel-cdn.com',
+    'funeshoy.com.ar', 'eloccidental.com.ar', 'fmdiezfunes.com.ar',
+    'infobae.com', 'tn.com.ar', 'radiofonica.com', 'ambito.com',
+    'media.ambito.com', 'elliberador.com', 'resizer.glanacion.com',
+];
+
+function ssrIsUsableImage(string $url): bool {
+    return $url !== '' && !preg_match('~picsum\.photos|images\.unsplash\.com~i', $url);
+}
+
+function ssrResolveImgSrc(string $url): string {
+    if (!ssrIsUsableImage($url)) return '';
+    $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
+    foreach (SSR_PROXY_DOMAINS as $d) {
+        if ($host === $d || str_ends_with($host, '.' . $d)) {
+            return 'api/img.php?url=' . urlencode($url);
+        }
+    }
+    return htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
+}
+
+function ssrSourceInitials(string $source): string {
+    $words = preg_split('/\s+/', trim($source), -1, PREG_SPLIT_NO_EMPTY);
+    if (!$words) return 'FN';
+    if (count($words) === 1) return strtoupper(mb_substr($words[0], 0, 2));
+    return strtoupper(mb_substr($words[0], 0, 1) . mb_substr($words[1], 0, 1));
+}
+
+function ssrFormatDate(string $pubDate): string {
+    static $months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+    $ts = strtotime($pubDate);
+    if ($ts === false) return '';
+    return sprintf('%02d %s %d', (int)date('d', $ts), $months[(int)date('n', $ts) - 1], (int)date('Y', $ts));
+}
+
+$db          = new Database();
+$ssrNews     = $db->getNews(12);
+$ssrSources  = $db->getSources();
+$lastUpdate  = $db->getLastUpdate();
+
+$ssrIds        = array_column($ssrNews, 'id');
+$ssrHasMore    = count($ssrNews) === 12;
+$ssrLastUpdate = $lastUpdate ? date('Y-m-d H:i:s', $lastUpdate) : '';
+$allSources    = array_merge(['Todas'], $ssrSources);
+
+// Primera imagen válida → hint de preload para el elemento LCP
+$lcpImageUrl = '';
+foreach ($ssrNews as $_item) {
+    $raw = trim((string)($_item['image_url'] ?? ''));
+    if (ssrIsUsableImage($raw)) {
+        $lcpImageUrl = ssrResolveImgSrc($raw);
+        break;
+    }
+}
+?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -64,6 +129,10 @@
     <noscript>
         <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Outfit:wght@400;600;700&display=swap">
     </noscript>
+    <!-- Preload de la imagen LCP: el browser la descarga en paralelo antes de parsear el body -->
+    <?php if ($lcpImageUrl !== ''): ?>
+    <link rel="preload" as="image" href="<?= $lcpImageUrl ?>" fetchpriority="high">
+    <?php endif; ?>
     <!-- Custom CSS con cache-buster basado en fecha de modificación del archivo -->
     <link rel="stylesheet" href="assets/css/style.css?v=<?= filemtime(__DIR__ . '/assets/css/style.css') ?>">
     <!-- Google tag (gtag.js) -->
@@ -97,9 +166,45 @@
     </header>
 
     <main class="container">
-        <!-- Grilla principal de noticias, populada dinámicamente desde la API -->
+        <!-- Grilla principal de noticias -->
         <section class="news-grid" id="news-container">
-            <!-- Estado de carga inicial (skeleton) mientras se obtienen las noticias -->
+        <?php if (!empty($ssrNews)): ?>
+            <?php foreach ($ssrNews as $i => $ssrItem):
+                $rawImg   = trim((string)($ssrItem['image_url'] ?? ''));
+                $hasImg   = ssrIsUsableImage($rawImg);
+                $imgSrc   = $hasImg ? ssrResolveImgSrc($rawImg) : '';
+                $t        = htmlspecialchars($ssrItem['title'],  ENT_QUOTES, 'UTF-8');
+                $s        = htmlspecialchars($ssrItem['source'], ENT_QUOTES, 'UTF-8');
+                $initials = htmlspecialchars(ssrSourceInitials($ssrItem['source']), ENT_QUOTES, 'UTF-8');
+                $dateStr  = ssrFormatDate($ssrItem['pub_date']);
+                $rawImgEsc = htmlspecialchars($rawImg, ENT_QUOTES, 'UTF-8');
+            ?>
+            <article class="news-card" data-id="<?= (int)$ssrItem['id'] ?>">
+                <div class="card-img-wrapper<?= $hasImg ? '' : ' no-image' ?>" data-source="<?= $s ?>">
+                    <?php if ($hasImg): ?>
+                        <img src="<?= $imgSrc ?>"
+                             alt="<?= $t ?>"
+                             data-original-src="<?= $rawImgEsc ?>"
+                             <?= $i === 0 ? 'fetchpriority="high"' : 'loading="lazy"' ?>
+                             width="640" height="360">
+                    <?php else: ?>
+                        <div class="card-media-placeholder" aria-hidden="true">
+                            <div class="card-media-glyph"><?= $initials ?></div>
+                            <div class="card-media-text">Cobertura sin imagen</div>
+                        </div>
+                    <?php endif; ?>
+                    <span class="card-source"><?= $s ?></span>
+                </div>
+                <div class="card-content">
+                    <h2 class="card-title"><?= $t ?></h2>
+                    <div class="card-footer">
+                        <span class="card-date"><?= $dateStr ?></span>
+                        <a href="article.php?id=<?= (int)$ssrItem['id'] ?>" class="read-more">Leer artículo</a>
+                    </div>
+                </div>
+            </article>
+            <?php endforeach; ?>
+        <?php else: ?>
             <div class="news-card skeleton">
                 <div class="skeleton-img"></div>
                 <div class="card-content">
@@ -124,6 +229,7 @@
                     <div class="skeleton-text short"></div>
                 </div>
             </div>
+        <?php endif; ?>
         </section>
         
         <!-- Indicador de carga mientras se actualizan las noticias desde la API -->
@@ -145,6 +251,15 @@
         </div>
     </footer>
 
+    <!-- Datos SSR para hidratación del JS sin re-fetch inicial -->
+    <script>
+    window.__SSR__ = <?= json_encode([
+        'ids'        => $ssrIds,
+        'lastUpdate' => $ssrLastUpdate,
+        'sources'    => $allSources,
+        'hasMore'    => $ssrHasMore,
+    ], JSON_UNESCAPED_UNICODE) ?>;
+    </script>
     <script src="assets/js/main.js?v=<?= filemtime(__DIR__ . '/assets/js/main.js') ?>"></script>
 </body>
 </html>

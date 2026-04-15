@@ -409,6 +409,22 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // ── Inicialización ───────────────────────────────────────────────────
-    fetchNews(true);
+    const ssr = window.__SSR__;
+    if (ssr && ssr.ids && ssr.ids.length > 0) {
+        // El servidor ya rindió las tarjetas en HTML: solo hidratamos el estado JS.
+        ssr.ids.forEach(id => shownIds.add(id));
+        lastKnownUpdate = ssr.lastUpdate;
+        currentPage     = 1;
+        if (ssr.sources) updateFilters(ssr.sources);
+        if (ssr.hasMore)  loadMoreContainer.classList.remove('hidden');
+
+        // Adjuntar el handler de error/fallback a las imágenes SSR
+        document.querySelectorAll('#news-container article img[data-original-src]').forEach(img => {
+            attachImgFallback(img, img.dataset.originalSrc);
+        });
+    } else {
+        // Fallback: base de datos vacía o sin PHP, cargar vía API
+        fetchNews(true);
+    }
     startAutoRefresh();
 });
