@@ -11,7 +11,10 @@
     RewriteCond %{HTTP_HOST} !^127\.0\.0\.1
 
     # HTTP → HTTPS
+    # Se verifica también X-Forwarded-Proto porque el stack Docker/proxy termina
+    # el TLS antes de llegar a Apache, por lo que %{HTTPS} siempre es "off".
     RewriteCond %{HTTPS} off
+    RewriteCond %{HTTP:X-Forwarded-Proto} !https
     RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
 
     # funesya.com.ar → www.funesya.com.ar (dominio canónico)
