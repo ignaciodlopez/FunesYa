@@ -28,14 +28,93 @@ $pubDate           = $data['pubDate'];
 $imageUrl          = $data['imageUrl'];
 $externalLink      = $data['externalLink'];
 $summaryParagraphs = $data['summaryParagraphs'];
+$ogImageUrl        = $data['ogImageUrl'];
+$pubDateIso        = $data['pubDateIso'];
+
+// Valores para SEO (decodificados de HTML para uso en JSON-LD)
+$canonicalUrl    = 'https://www.funesya.com.ar/article.php?id=' . $id;
+$rawTitle        = htmlspecialchars_decode($title, ENT_QUOTES);
+$rawSource       = htmlspecialchars_decode($source, ENT_QUOTES);
+$rawDescription  = htmlspecialchars_decode($summaryParagraphs[0] ?? '', ENT_QUOTES);
+$metaDescription = mb_strlen($rawDescription) > 160
+    ? mb_substr($rawDescription, 0, 157) . '…'
+    : ($rawDescription !== '' ? $rawDescription : $rawTitle);
+$metaDescriptionEsc = htmlspecialchars($metaDescription, ENT_QUOTES, 'UTF-8');
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- SEO básico -->
     <title><?= $title ?> — FunesYa</title>
-    <meta name="description" content="<?= $summaryParagraphs[0] ?? $title ?>">
+    <meta name="description" content="<?= $metaDescriptionEsc ?>">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <link rel="canonical" href="<?= $canonicalUrl ?>">
+
+    <!-- Open Graph (Facebook, WhatsApp, LinkedIn) -->
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="<?= $canonicalUrl ?>">
+    <meta property="og:site_name" content="FunesYa">
+    <meta property="og:locale" content="es_AR">
+    <meta property="og:title" content="<?= $title ?> — FunesYa">
+    <meta property="og:description" content="<?= $metaDescriptionEsc ?>">
+    <meta property="article:published_time" content="<?= $pubDateIso ?>">
+    <meta property="article:author" content="<?= $source ?>">
+    <meta property="article:section" content="Noticias locales">
+    <?php if ($ogImageUrl !== ''): ?>
+    <meta property="og:image" content="<?= $ogImageUrl ?>">
+    <meta property="og:image:alt" content="<?= $title ?>">
+    <?php endif; ?>
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="<?= $ogImageUrl !== '' ? 'summary_large_image' : 'summary' ?>">
+    <meta name="twitter:title" content="<?= $title ?> — FunesYa">
+    <meta name="twitter:description" content="<?= $metaDescriptionEsc ?>">
+    <?php if ($ogImageUrl !== ''): ?>
+    <meta name="twitter:image" content="<?= $ogImageUrl ?>">
+    <meta name="twitter:image:alt" content="<?= $title ?>">
+    <?php endif; ?>
+
+    <!-- JSON-LD: NewsArticle -->
+    <script type="application/ld+json">
+    <?= json_encode([
+        '@context' => 'https://schema.org',
+        '@type'    => 'NewsArticle',
+        'headline' => $rawTitle,
+        'description' => $rawDescription !== '' ? $rawDescription : $rawTitle,
+        'url'      => $canonicalUrl,
+        'datePublished' => $pubDateIso,
+        'dateModified'  => $pubDateIso,
+        'inLanguage' => 'es-AR',
+        'image'    => $ogImageUrl !== '' ? htmlspecialchars_decode($ogImageUrl, ENT_QUOTES) : null,
+        'author'   => [
+            '@type' => 'Organization',
+            'name'  => $rawSource,
+        ],
+        'publisher' => [
+            '@type' => 'Organization',
+            '@id'   => 'https://www.funesya.com.ar/#organization',
+            'name'  => 'FunesYa',
+            'url'   => 'https://www.funesya.com.ar/',
+        ],
+        'isPartOf' => [
+            '@type' => 'WebSite',
+            '@id'   => 'https://www.funesya.com.ar/#website',
+            'name'  => 'FunesYa',
+            'url'   => 'https://www.funesya.com.ar/',
+        ],
+        'breadcrumb' => [
+            '@type' => 'BreadcrumbList',
+            'itemListElement' => [
+                ['@type' => 'ListItem', 'position' => 1, 'name' => 'Inicio', 'item' => 'https://www.funesya.com.ar/'],
+                ['@type' => 'ListItem', 'position' => 2, 'name' => $rawTitle, 'item' => $canonicalUrl],
+            ],
+        ],
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) ?>
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@400;600;700&display=swap" rel="stylesheet">

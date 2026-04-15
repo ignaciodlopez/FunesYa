@@ -1,4 +1,25 @@
 # ──────────────────────────────────────────────
+# Canonical: HTTPS + www
+# Redirige HTTP a HTTPS y funesya.com.ar a www.funesya.com.ar
+# (301 permanente para que Google consolide la autoridad de enlace)
+# ──────────────────────────────────────────────
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # Excluir localhost y entornos de desarrollo
+    RewriteCond %{HTTP_HOST} !^localhost [NC]
+    RewriteCond %{HTTP_HOST} !^127\.0\.0\.1
+
+    # HTTP → HTTPS
+    RewriteCond %{HTTPS} off
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+
+    # funesya.com.ar → www.funesya.com.ar (dominio canónico)
+    RewriteCond %{HTTP_HOST} ^funesya\.com\.ar$ [NC]
+    RewriteRule ^ https://www.funesya.com.ar%{REQUEST_URI} [R=301,L]
+</IfModule>
+
+# ──────────────────────────────────────────────
 # Seguridad: proteger archivos y directorios
 # sensibles de acceso directo desde el navegador.
 # ──────────────────────────────────────────────
@@ -29,9 +50,10 @@ Options -Indexes
     Header always set X-Frame-Options "SAMEORIGIN"
     Header always set Referrer-Policy "strict-origin-when-cross-origin"
     Header always set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+    # CSP: 'unsafe-inline' en script-src es necesario para el código de Google Analytics
+    # y los bloques JSON-LD (<script type="application/ld+json">).
     # 'unsafe-inline' en style-src es necesario por el bloque <style> en article.php.
-    # Para eliminar esta excepción, mover ese CSS a assets/css/style.css.
-    Header always set Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self';"
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://www.google-analytics.com https://analytics.google.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self';"
 </IfModule>
 
 # ──────────────────────────────────────────────
@@ -40,6 +62,8 @@ Options -Indexes
 # ──────────────────────────────────────────────
 <IfModule mod_deflate.c>
     AddOutputFilterByType DEFLATE text/html
+    AddOutputFilterByType DEFLATE text/xml
+    AddOutputFilterByType DEFLATE application/xml
     AddOutputFilterByType DEFLATE text/css
     AddOutputFilterByType DEFLATE application/javascript
     AddOutputFilterByType DEFLATE application/json

@@ -239,6 +239,19 @@ class Database
     }
 
     /**
+     * Devuelve id y pub_date de todos los artículos para generar el sitemap XML.
+     * Limitado a 50 000 URLs (límite de Google Sitemaps).
+     *
+     * @return array<array{id: int, pub_date: string}>
+     */
+    public function getAllForSitemap(): array {
+        $stmt = $this->pdo->query(
+            "SELECT id, pub_date FROM news ORDER BY pub_date DESC LIMIT 50000"
+        );
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * Devuelve todos los links almacenados para una fuente concreta.
      * Se usa para deduplicar artículos al agregar, evitando re-insertar
      * artículos que ya existen con distinto slug (ej. InfoFunes).

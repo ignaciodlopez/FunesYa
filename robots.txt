@@ -1,0 +1,18 @@
+# FunesYa — robots.txt
+# https://www.funesya.com.ar/
+
+User-agent: *
+Allow: /
+Allow: /article.php
+Allow: /index.php
+Allow: /rss.xml
+Allow: /sitemap.php
+
+# Bloquear rutas que no aportan valor de indexación
+Disallow: /api/
+Disallow: /scripts/
+Disallow: /src/
+Disallow: /data/
+
+# Sitemap principal
+Sitemap: https://www.funesya.com.ar/sitemap.php

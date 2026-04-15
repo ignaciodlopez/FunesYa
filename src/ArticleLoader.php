@@ -44,8 +44,25 @@ class ArticleLoader
         $imageUrl          = self::resolveImageUrl($article);
         $externalLink      = self::resolveExternalLink($article['link']);
         $summaryParagraphs = $this->resolveSummary($article);
+        $ogImageUrl        = self::resolveOgImageUrl($article);
+        $pubDateIso        = date('c', strtotime($article['pub_date']));
 
-        return compact('title', 'source', 'pubDate', 'imageUrl', 'externalLink', 'summaryParagraphs');
+        return compact('title', 'source', 'pubDate', 'imageUrl', 'externalLink', 'summaryParagraphs', 'ogImageUrl', 'pubDateIso');
+    }
+
+    /**
+     * Devuelve la URL original de la imagen del artículo (sin proxy) para og:image.
+     * Retorna cadena vacía si no hay imagen válida.
+     */
+    private static function resolveOgImageUrl(array $article): string
+    {
+        $rawImageUrl = trim((string)($article['image_url'] ?? ''));
+
+        if ($rawImageUrl === '' || preg_match('~(?:picsum\.photos|images\.unsplash\.com)~i', $rawImageUrl) === 1) {
+            return '';
+        }
+
+        return htmlspecialchars($rawImageUrl, ENT_QUOTES, 'UTF-8');
     }
 
     /**

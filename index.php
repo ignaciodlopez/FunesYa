@@ -3,8 +3,55 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FunesYa - Tu portal de noticias locales</title>
-    <meta name="description" content="Las últimas noticias de la ciudad de Funes, Santa Fe. Se actualiza cada 2 minutos de múltiples fuentes locales.">
+
+    <!-- SEO básico -->
+    <title>FunesYa — Noticias de Funes, Santa Fe en tiempo real</title>
+    <meta name="description" content="Las últimas noticias de Funes, Santa Fe. Actualizadas cada 2 minutos desde múltiples medios locales: InfoFunes, La Voz de Funes, Funes Hoy y más.">
+    <meta name="keywords" content="noticias Funes, Santa Fe, noticias locales Funes, FunesYa, periodismo local, información Funes">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <link rel="canonical" href="https://www.funesya.com.ar/">
+
+    <!-- RSS autodiscovery -->
+    <link rel="alternate" type="application/rss+xml" title="FunesYa — Noticias de Funes" href="https://www.funesya.com.ar/rss.xml">
+
+    <!-- Open Graph (Facebook, WhatsApp, LinkedIn) -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://www.funesya.com.ar/">
+    <meta property="og:site_name" content="FunesYa">
+    <meta property="og:locale" content="es_AR">
+    <meta property="og:title" content="FunesYa — Noticias de Funes, Santa Fe en tiempo real">
+    <meta property="og:description" content="Las últimas noticias de Funes, Santa Fe. Actualizadas cada 2 minutos desde múltiples medios locales.">
+
+    <!-- Twitter / X Card -->
+    <meta name="twitter:card" content="summary">
+    <meta name="twitter:title" content="FunesYa — Noticias de Funes, Santa Fe en tiempo real">
+    <meta name="twitter:description" content="Las últimas noticias de Funes, Santa Fe. Actualizadas cada 2 minutos desde múltiples medios locales.">
+
+    <!-- JSON-LD: WebSite + Organization -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "WebSite",
+          "@id": "https://www.funesya.com.ar/#website",
+          "url": "https://www.funesya.com.ar/",
+          "name": "FunesYa",
+          "description": "Portal de noticias locales de Funes, Santa Fe, Argentina.",
+          "inLanguage": "es-AR",
+          "publisher": { "@id": "https://www.funesya.com.ar/#organization" }
+        },
+        {
+          "@type": "Organization",
+          "@id": "https://www.funesya.com.ar/#organization",
+          "name": "FunesYa",
+          "url": "https://www.funesya.com.ar/",
+          "description": "Agregador de noticias locales de Funes, Santa Fe, Argentina."
+        }
+      ]
+    }
+    </script>
+
     <!-- Google Fonts: carga asíncrona para no bloquear el render (FCP) -->
     <!-- preconnect reduce la latencia DNS+TCP+TLS antes de que el CSS las solicite -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
