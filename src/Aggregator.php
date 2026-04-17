@@ -16,6 +16,26 @@ class Aggregator
         'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
         . 'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
+    /** @var array<string, array{etag: string, last_modified: string}> Cabeceras de caché por URL de feed */
+    private array $feedCacheHeaders = [];
+
+    private const FEED_CACHE_FILE = __DIR__ . '/../data/feed_cache_headers.json';
+
+    private function loadFeedCacheHeaders(): void {
+        if (file_exists(self::FEED_CACHE_FILE)) {
+            $data = json_decode(file_get_contents(self::FEED_CACHE_FILE), true);
+            $this->feedCacheHeaders = is_array($data) ? $data : [];
+        }
+    }
+
+    private function saveFeedCacheHeaders(): void {
+        file_put_contents(
+            self::FEED_CACHE_FILE,
+            json_encode($this->feedCacheHeaders, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            LOCK_EX
+        );
+    }
+
     private function log(string $message): void {
         // Rotar log cuando supera 500 KB: conservar las últimas 300 líneas
         if (file_exists($this->logFile) && filesize($this->logFile) > 512000) {
@@ -55,6 +75,7 @@ class Aggregator
         $newsList = [];
         $this->cycleStatus = [];
         $this->log('--- Inicio ciclo de actualización ---');
+        $this->loadFeedCacheHeaders();
 
         foreach ($this->feeds as $name => $url) {
             $feedItems = $this->parseFeed($url, $name);
@@ -100,6 +121,7 @@ class Aggregator
             'sources' => $this->cycleStatus,
         ]);
         
+        $this->saveFeedCacheHeaders();
         $this->db->setLastUpdate(time());
     }
 
@@ -247,42 +269,88 @@ class Aggregator
     }
 
     /**
-     * Descarga y parsea un feed RSS. Retorna datos mock si el feed no está disponible.
+     * Descarga y parsea un feed RSS o Atom. Soporta ETag/Last-Modified para evitar
+     * reprocesar feeds sin cambios. Reintenta una vez ante fallos de red.
      *
-     * @param string $url        URL del feed RSS
+     * @param string $url        URL del feed
      * @param string $sourceName Nombre del medio de comunicación
      * @return array             Lista de noticias con título, link, imagen, fuente y fecha
      */
     private function parseFeed(string $url, string $sourceName): array {
         $items = [];
+
+        // Construir cabeceras condicionales si tenemos ETag/Last-Modified previos
+        $conditionalHeaders = [];
+        if (!empty($this->feedCacheHeaders[$url]['etag'])) {
+            $conditionalHeaders[] = 'If-None-Match: ' . $this->feedCacheHeaders[$url]['etag'];
+        }
+        if (!empty($this->feedCacheHeaders[$url]['last_modified'])) {
+            $conditionalHeaders[] = 'If-Modified-Since: ' . $this->feedCacheHeaders[$url]['last_modified'];
+        }
+
         $ctx = stream_context_create([
-            'http' => ['timeout' => 5, 'user_agent' => self::USER_AGENT],
-            'ssl'  => ['verify_peer' => true, 'verify_peer_name' => true],
+            'http' => [
+                'timeout'    => 5,
+                'user_agent' => self::USER_AGENT,
+                'header'     => implode("\r\n", $conditionalHeaders),
+            ],
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
         ]);
 
-        $rssContent = @file_get_contents($url, false, $ctx);
+        // Reintento: 2 intentos con 1 s de pausa entre ellos
+        $rssContent = false;
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            $rssContent = @file_get_contents($url, false, $ctx);
+            if ($rssContent !== false) break;
+            if ($attempt < 2) sleep(1);
+        }
+
         if ($rssContent === false || $rssContent === '') {
-            $this->log("[ERROR] {$sourceName}: no se pudo descargar el feed ({$url})");
+            $this->log("[ERROR] {$sourceName}: no se pudo descargar el feed tras 2 intentos ({$url})");
             $this->setSourceStatus($sourceName, [
                 'state' => 'error',
                 'type' => 'feed',
                 'url' => $url,
-                'message' => 'No se pudo descargar el feed',
+                'message' => 'No se pudo descargar el feed tras 2 intentos',
             ]);
             return [];
         }
 
-        // Verificar código HTTP — rechazar respuestas de error antes de parsear
+        // Verificar código HTTP — 304 = sin cambios, devolver vacío sin reprocesar
         if (!empty($http_response_header)) {
-            if (preg_match('/HTTP\/\S+ (\d+)/', $http_response_header[0], $hm) && (int)$hm[1] >= 400) {
-                $this->log("[ERROR] {$sourceName}: feed retornó HTTP {$hm[1]} ({$url})");
-                $this->setSourceStatus($sourceName, [
-                    'state' => 'error',
-                    'type' => 'feed',
-                    'url' => $url,
-                    'message' => 'HTTP ' . $hm[1],
-                ]);
-                return [];
+            if (preg_match('/HTTP\/\S+ (\d+)/', $http_response_header[0], $hm)) {
+                $statusCode = (int)$hm[1];
+                if ($statusCode === 304) {
+                    $this->log("[SKIP] {$sourceName}: feed sin cambios (304)");
+                    $this->setSourceStatus($sourceName, [
+                        'state' => 'ok',
+                        'type' => 'feed',
+                        'url' => $url,
+                        'items_fetched' => 0,
+                        'message' => 'Sin cambios desde el último ciclo (304)',
+                    ]);
+                    return [];
+                }
+                if ($statusCode >= 400) {
+                    $this->log("[ERROR] {$sourceName}: feed retornó HTTP {$statusCode} ({$url})");
+                    $this->setSourceStatus($sourceName, [
+                        'state' => 'error',
+                        'type' => 'feed',
+                        'url' => $url,
+                        'message' => 'HTTP ' . $statusCode,
+                    ]);
+                    return [];
+                }
+            }
+
+            // Guardar ETag y Last-Modified para el próximo ciclo
+            foreach ($http_response_header as $h) {
+                if (stripos($h, 'ETag:') === 0) {
+                    $this->feedCacheHeaders[$url]['etag'] = trim(substr($h, 5));
+                }
+                if (stripos($h, 'Last-Modified:') === 0) {
+                    $this->feedCacheHeaders[$url]['last_modified'] = trim(substr($h, 14));
+                }
             }
         }
 
@@ -290,52 +358,27 @@ class Aggregator
         try {
             $xml = simplexml_load_string($rssContent);
             libxml_clear_errors();
-            if ($xml && isset($xml->channel->item)) {
-                foreach ($xml->channel->item as $item) {
-                    // Decodificar entities en título y link antes de cualquier uso
-                    $title = trim(html_entity_decode((string)$item->title, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-                    $link  = trim(html_entity_decode((string)$item->link,  ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 
-                    // Descartar ítems sin título o sin link válido
-                    if ($title === '' || $link === '' || !str_starts_with($link, 'http')) continue;
-
-                    $image = $this->extractImage($item);
-                    $pubDateStr = (string)$item->pubDate;
-                    $pubDateTimestamp = strtotime($pubDateStr) ?: time();
-
-                    // Extraer descripción: limpiar HTML y limitar a 400 caracteres
-                    $rawDesc = (string)$item->description;
-                    $description = trim(html_entity_decode(strip_tags($rawDesc), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-                    if (strlen($description) > 400) {
-                        $description = mb_substr($description, 0, 397) . '...';
-                    }
-
-                    $items[] = [
-                        'title'       => $title,
-                        'link'        => $link,
-                        'image_url'   => $image,
-                        'source'      => $sourceName,
-                        'pub_date'    => date('Y-m-d H:i:s', $pubDateTimestamp),
-                        'description' => $description ?: null,
-                    ];
-                }
-                $this->log("[OK] {$sourceName}: " . count($items) . " artículos obtenidos");
-                $latestPubDate = null;
-                foreach ($items as $entry) {
-                    if ($latestPubDate === null || $entry['pub_date'] > $latestPubDate) {
-                        $latestPubDate = $entry['pub_date'];
-                    }
-                }
+            if (!$xml) {
+                $this->log("[WARN] {$sourceName}: feed inválido o sin ítems");
                 $this->setSourceStatus($sourceName, [
-                    'state' => 'ok',
+                    'state' => 'warn',
                     'type' => 'feed',
                     'url' => $url,
-                    'items_fetched' => count($items),
-                    'latest_pub_date' => $latestPubDate,
-                    'message' => 'Feed procesado correctamente',
+                    'message' => 'Feed inválido o sin ítems',
                 ]);
+                return [];
+            }
+
+            // Detectar formato: RSS (<channel><item>) o Atom (<feed><entry>)
+            $rootName = $xml->getName();
+            $isAtom = ($rootName === 'feed');
+
+            if ($isAtom) {
+                $items = $this->parseAtomFeed($xml, $sourceName, $url);
+            } elseif (isset($xml->channel->item)) {
+                $items = $this->parseRssFeed($xml, $sourceName, $url);
             } else {
-                libxml_clear_errors();
                 $this->log("[WARN] {$sourceName}: feed inválido o sin ítems");
                 $this->setSourceStatus($sourceName, [
                     'state' => 'warn',
@@ -358,6 +401,141 @@ class Aggregator
         }
 
         return $items;
+    }
+
+    /** Parsea un feed RSS 2.0 y devuelve los ítems normalizados. */
+    private function parseRssFeed(SimpleXMLElement $xml, string $sourceName, string $url): array {
+        $items = [];
+        foreach ($xml->channel->item as $item) {
+            $title = trim(html_entity_decode((string)$item->title, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            $link  = trim(html_entity_decode((string)$item->link,  ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+            if ($title === '' || $link === '' || !str_starts_with($link, 'http')) continue;
+
+            $image = $this->extractImage($item);
+            $pubDateTimestamp = strtotime((string)$item->pubDate) ?: time();
+
+            $rawDesc = (string)$item->description;
+            $description = trim(html_entity_decode(strip_tags($rawDesc), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (mb_strlen($description, 'UTF-8') > 400) {
+                $description = mb_substr($description, 0, 397, 'UTF-8') . '...';
+            }
+
+            $items[] = [
+                'title'       => $title,
+                'link'        => $link,
+                'image_url'   => $image,
+                'source'      => $sourceName,
+                'pub_date'    => date('Y-m-d H:i:s', $pubDateTimestamp),
+                'description' => $description ?: null,
+            ];
+        }
+
+        $this->log("[OK] {$sourceName}: " . count($items) . " artículos obtenidos (RSS)");
+        $this->setSourceStatus($sourceName, [
+            'state' => 'ok',
+            'type' => 'feed',
+            'url' => $url,
+            'items_fetched' => count($items),
+            'latest_pub_date' => $this->latestPubDate($items),
+            'message' => 'Feed RSS procesado correctamente',
+        ]);
+
+        return $items;
+    }
+
+    /** Parsea un feed Atom 1.0 y devuelve los ítems normalizados. */
+    private function parseAtomFeed(SimpleXMLElement $xml, string $sourceName, string $url): array {
+        $items = [];
+        $ns = $xml->getNamespaces(true);
+
+        foreach ($xml->entry as $entry) {
+            $title = trim(html_entity_decode((string)$entry->title, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+
+            // <link rel="alternate" href="..."> o el primer <link href="...">
+            $link = '';
+            foreach ($entry->link as $l) {
+                $rel  = (string)$l['rel'];
+                $href = trim((string)$l['href']);
+                if ($href !== '' && ($rel === 'alternate' || $rel === '')) {
+                    $link = $href;
+                    break;
+                }
+            }
+            if ($link === '' && isset($entry->link['href'])) {
+                $link = trim((string)$entry->link['href']);
+            }
+
+            if ($title === '' || $link === '' || !str_starts_with($link, 'http')) continue;
+
+            // Fecha: <updated> o <published>
+            $dateStr = (string)($entry->updated ?? $entry->published ?? '');
+            $pubDateTimestamp = strtotime($dateStr) ?: time();
+
+            // Descripción desde <summary> o <content>
+            $rawDesc = (string)($entry->summary ?? $entry->content ?? '');
+            $description = trim(html_entity_decode(strip_tags($rawDesc), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            if (mb_strlen($description, 'UTF-8') > 400) {
+                $description = mb_substr($description, 0, 397, 'UTF-8') . '...';
+            }
+
+            // Imagen: intentar media:thumbnail, media:content, og:image de la página
+            $image = '';
+            foreach ($ns as $prefix => $nsUri) {
+                if (str_contains($nsUri, 'media.')) {
+                    $media = $entry->children($nsUri);
+                    if (isset($media->thumbnail)) {
+                        $candidate = trim((string)$media->thumbnail['url']);
+                        if ($candidate !== '' && str_starts_with($candidate, 'http')) {
+                            $image = $candidate;
+                            break;
+                        }
+                    }
+                    if (isset($media->content)) {
+                        $candidate = trim((string)$media->content['url']);
+                        if ($candidate !== '' && str_starts_with($candidate, 'http')) {
+                            $image = $candidate;
+                            break;
+                        }
+                    }
+                }
+            }
+            if ($image === '') {
+                $og = $this->fetchOgImage($link);
+                $image = $og ?? '';
+            }
+
+            $items[] = [
+                'title'       => $title,
+                'link'        => $link,
+                'image_url'   => $image,
+                'source'      => $sourceName,
+                'pub_date'    => date('Y-m-d H:i:s', $pubDateTimestamp),
+                'description' => $description ?: null,
+            ];
+        }
+
+        $this->log("[OK] {$sourceName}: " . count($items) . " artículos obtenidos (Atom)");
+        $this->setSourceStatus($sourceName, [
+            'state' => 'ok',
+            'type' => 'feed',
+            'url' => $url,
+            'items_fetched' => count($items),
+            'latest_pub_date' => $this->latestPubDate($items),
+            'message' => 'Feed Atom procesado correctamente',
+        ]);
+
+        return $items;
+    }
+
+    private function latestPubDate(array $items): ?string {
+        $latest = null;
+        foreach ($items as $entry) {
+            if ($latest === null || $entry['pub_date'] > $latest) {
+                $latest = $entry['pub_date'];
+            }
+        }
+        return $latest;
     }
 
     /**
@@ -681,7 +859,7 @@ class Aggregator
     /**
      * Obtiene la imagen principal de una URL buscando los meta tags
      * og:image o twitter:image en el <head> de la página.
-     * Solo descarga los primeros 15 KB para no procesar el body completo.
+     * Solo descarga los primeros 30 KB para no procesar el body completo.
      *
      * @param string $url URL del artículo
      * @return string|null URL de la imagen, o null si no se encontró
@@ -694,15 +872,22 @@ class Aggregator
                 'user_agent'      => self::USER_AGENT,
                 'follow_location' => 1,
                 'max_redirects'   => 3,
-                'header'          => "Accept: text/html,*/*\r\nAccept-Language: es-AR,es;q=0.9\r\n",
+                'header'          => "Accept: text/html,*/*\r\nAccept-Language: es-AR,es;q=0.9\r\nRange: bytes=0-30719\r\n",
             ],
             'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
         ]);
 
-        $html = @file_get_contents($url, false, $ctx);
-        if ($html === false || $html === '') {
+        $fp = @fopen($url, 'rb', false, $ctx);
+        if ($fp === false) {
             return null;
         }
+        $html = '';
+        while (!feof($fp) && strlen($html) < 30720) {
+            $chunk = fread($fp, 8192);
+            if ($chunk === false) break;
+            $html .= $chunk;
+        }
+        fclose($fp);
 
         $parsed = parse_url($url);
         $scheme = $parsed['scheme'] ?? 'https';

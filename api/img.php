@@ -45,6 +45,17 @@ const CACHE_SMALL_THRESHOLD = 50 * 1024; // 50 KB
 // Directorio de caché (dentro de data/ que ya está protegido por .htaccess)
 $cacheDir = __DIR__ . '/../data/img_cache';
 
+// Limpieza proactiva: borrar archivos expirados una vez cada ~200 requests
+// (probabilidad 0.5 % para no impactar latencia en el caso habitual)
+if (is_dir($cacheDir) && mt_rand(1, 200) === 1) {
+    $maxTtl = CACHE_TTL_LARGE;
+    foreach (glob($cacheDir . '/*') as $f) {
+        if (is_file($f) && (time() - filemtime($f)) > $maxTtl) {
+            @unlink($f);
+        }
+    }
+}
+
 $rawUrl = $_GET['url'] ?? '';
 
 // Ancho máximo de salida (0 = sin redimensionar). Validado a [1, 2000].
@@ -226,8 +237,9 @@ function resizeAndConvert(string $imageData, string &$contentType, int $maxWidth
     return null; // No se pudo convertir: se sirve el original
 }
 
-// Redimensionar/convertir si se solicitó ancho o si la imagen no es WebP ya
-$needsProcessing = $maxWidth > 0 && !in_array($contentType, ['image/svg+xml', 'image/gif'], true);
+// Redimensionar y/o convertir a WebP siempre que GD lo permita
+// (no solo cuando se pidió ancho, así el caché acumula WebP en lugar de JPEG/PNG)
+$needsProcessing = !in_array($contentType, ['image/svg+xml', 'image/gif'], true);
 if ($needsProcessing) {
     $processed = resizeAndConvert($image, $contentType, $maxWidth);
     if ($processed !== null) {
