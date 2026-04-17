@@ -18,6 +18,8 @@ class ArticleSummarizer
     private const MIN_PARA_LENGTH = 60;
     private const MAX_PARAGRAPHS  = 8;
     private const MAX_TEXT_CHARS  = 4000;   // ~1 000 tokens; evita derrochar cuota de Gemini
+    private const SCRAPE_MAX_BYTES = 51200; // 50 KB: suficiente para extraer párrafos del artículo
+    private const GEMINI_MIN_INTERVAL_MS = 350; // Mínimo entre llamadas a Gemini (ms)
     private const GEMINI_ENDPOINT =
         'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
 
@@ -80,13 +82,24 @@ class ArticleSummarizer
                 'timeout'         => self::HTTP_TIMEOUT,
                 'user_agent'      => self::SCRAPE_USER_AGENT,
                 'follow_location' => 1,
-                'header'          => "Accept: text/html,*/*\r\nAccept-Language: es-AR,es;q=0.9\r\n",
+                'header'          => "Accept: text/html,*/*\r\nAccept-Language: es-AR,es;q=0.9\r\nRange: bytes=0-" . (self::SCRAPE_MAX_BYTES - 1) . "\r\n",
             ],
             'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
         ]);
 
-        $html = @file_get_contents($url, false, $ctx);
-        if ($html === false) {
+        $fp = @fopen($url, 'rb', false, $ctx);
+        if ($fp === false) {
+            return null;
+        }
+        $html = '';
+        while (!feof($fp) && strlen($html) < self::SCRAPE_MAX_BYTES) {
+            $chunk = fread($fp, 8192);
+            if ($chunk === false) break;
+            $html .= $chunk;
+        }
+        fclose($fp);
+
+        if ($html === '') {
             return null;
         }
 
@@ -137,7 +150,14 @@ class ArticleSummarizer
         if ($apiKey === null) {
             return null;
         }
-
+        // Rate limiting: garantizar al menos GEMINI_MIN_INTERVAL_MS entre llamadas
+        static $lastCallUs = 0;
+        $nowUs = (int)(microtime(true) * 1_000_000);
+        $minIntervalUs = self::GEMINI_MIN_INTERVAL_MS * 1_000;
+        if ($lastCallUs > 0 && ($nowUs - $lastCallUs) < $minIntervalUs) {
+            usleep($minIntervalUs - ($nowUs - $lastCallUs));
+        }
+        $lastCallUs = (int)(microtime(true) * 1_000_000);
         $prompt = "Sos un asistente de noticias en español rioplatense. "
             . "Generá un resumen claro y natural de la siguiente noticia en 3 oraciones, "
             . "sin repetir el título y sin inventar información. "

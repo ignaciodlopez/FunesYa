@@ -61,6 +61,35 @@ class Config
     }
 
     /**
+     * Dominios con hotlink protection: sus imágenes deben servirse a través del proxy.
+     * Esta es la fuente única de verdad — usada por Aggregator, ArticleLoader, index.php y main.js.
+     *
+     * @return string[]
+     */
+    public static function getProxyDomains(): array
+    {
+        return [
+            'lavozdefunes.com.ar',
+            'estacionline.com',
+            'flex-assets.tadevel-cdn.com',
+            'fmdiezfunes.com.ar',
+            'funeshoy.com.ar',
+            'eloccidental.com.ar',
+            'infofunes.com.ar',
+            'infobae.com',
+            'tn.com.ar',
+            'radiofonica.com',
+            'ambito.com',
+            'media.ambito.com',
+            'elliberador.com',
+            'resizer.glanacion.com',
+            'resizer.lavoz.com.ar',
+            'assets.dev-filo.dift.io',
+            'cloudfront.net',
+        ];
+    }
+
+    /**
      * Devuelve el valor de una variable de entorno.
      * Primero busca en el .env del proyecto, luego en las variables del sistema.
      */

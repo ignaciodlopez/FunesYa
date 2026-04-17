@@ -66,14 +66,11 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const proxyUrl = (url) => `api/img.php?url=${encodeURIComponent(url)}&w=640`;
 
-    // Dominios con hotlink protection: la imagen directa devuelve 403 o imagen de error.
-    // Solo estos van por el proxy; el resto se sirve directo (sin overhead de caché fría).
-    const HOTLINK_DOMAINS = [
-        'lavozdefunes.com.ar', 'estacionline.com', 'flex-assets.tadevel-cdn.com',
-        'funeshoy.com.ar', 'eloccidental.com.ar', 'fmdiezfunes.com.ar',
-        'infobae.com', 'tn.com.ar', 'radiofonica.com', 'ambito.com',
-        'media.ambito.com', 'elliberador.com', 'resizer.glanacion.com',
-    ];
+    // Dominios con hotlink protection inyectados desde PHP (fuente única: Config::getProxyDomains()).
+    // Si el objeto SSR no está disponible (test, iframe), usar lista vacía como fallback seguro.
+    const HOTLINK_DOMAINS = Array.isArray(window.__SSR__?.hotlinkDomains)
+        ? window.__SSR__.hotlinkDomains
+        : [];
 
     /**
      * Devuelve la URL a usar para cargar una imagen.

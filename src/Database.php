@@ -182,7 +182,8 @@ class Database
      * @return array              Lista de noticias como arrays asociativos
      */
     public function getNews(int $limit = 12, ?string $source = null, int $offset = 0): array {
-        $query = "SELECT * FROM news";
+        // Excluir description y canonical_key: no se necesitan en la vista de lista
+        $query = "SELECT id, title, link, image_url, source, pub_date FROM news";
         $params = [];
         
         if ($source && $source !== 'Todas') {
@@ -260,7 +261,11 @@ class Database
      * @return string[]      Array de URLs ya guardadas
      */
     public function getLinksBySource(string $source): array {
-        $stmt = $this->pdo->prepare("SELECT link FROM news WHERE source = :source");
+        // Limitar a los últimos 1000 registros: suficiente para deduplicar ciclos normales
+        // y evita cargar en memoria tablas muy grandes.
+        $stmt = $this->pdo->prepare(
+            "SELECT link FROM news WHERE source = :source ORDER BY id DESC LIMIT 1000"
+        );
         $stmt->execute([':source' => $source]);
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
     }
@@ -282,7 +287,7 @@ class Database
      *
      * @return array Lista de artículos con id, title, link, description
      */
-    public function getArticlesNeedingSummary(): array {
+    public function getArticlesNeedingSummary(int $limit = 50): array {
         $stmt = $this->pdo->prepare("
             SELECT id, title, link, description
             FROM news
@@ -292,7 +297,9 @@ class Database
                   OR (description LIKE '%...' AND LENGTH(description) < 500)
               )
             ORDER BY id DESC
+            LIMIT :limit
         ");
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }

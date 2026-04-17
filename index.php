@@ -6,13 +6,7 @@ require_once __DIR__ . '/src/Config.php';
 
 Config::bootstrap();
 
-// Dom. con hotlink protection - solo estos van por el proxy de imagen
-const SSR_HOTLINK_DOMAINS = [
-    'lavozdefunes.com.ar', 'estacionline.com', 'flex-assets.tadevel-cdn.com',
-    'funeshoy.com.ar', 'eloccidental.com.ar', 'fmdiezfunes.com.ar',
-    'infobae.com', 'tn.com.ar', 'radiofonica.com', 'ambito.com',
-    'media.ambito.com', 'elliberador.com', 'resizer.glanacion.com',
-];
+// Dom. con hotlink protection: fuente única en Config::getProxyDomains()
 
 function ssrIsUsableImage(string $url): bool {
     return $url !== '' && !preg_match('~picsum\.photos|images\.unsplash\.com~i', $url);
@@ -20,7 +14,7 @@ function ssrIsUsableImage(string $url): bool {
 
 function ssrNeedsProxy(string $url): bool {
     $host = strtolower(parse_url($url, PHP_URL_HOST) ?? '');
-    foreach (SSR_HOTLINK_DOMAINS as $d) {
+    foreach (Config::getProxyDomains() as $d) {
         if ($host === $d || str_ends_with($host, '.' . $d)) return true;
     }
     return false;
@@ -329,10 +323,11 @@ foreach ($ssrNews as $_item) {
     <!-- Datos SSR para hidratación del JS sin re-fetch inicial -->
     <script>
     window.__SSR__ = <?= json_encode([
-        'ids'        => $ssrIds,
-        'lastUpdate' => $ssrLastUpdate,
-        'sources'    => $allSources,
-        'hasMore'    => $ssrHasMore,
+        'ids'            => $ssrIds,
+        'lastUpdate'     => $ssrLastUpdate,
+        'sources'        => $allSources,
+        'hasMore'        => $ssrHasMore,
+        'hotlinkDomains' => Config::getProxyDomains(),
     ], JSON_UNESCAPED_UNICODE) ?>;
     </script>
     <script src="assets/js/main.js?v=<?= filemtime(__DIR__ . '/assets/js/main.js') ?>"></script>

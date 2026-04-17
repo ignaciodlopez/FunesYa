@@ -47,24 +47,18 @@ class Aggregator
     }
 
     /** @var array<string, string> Feeds RSS indexados por nombre del medio */
-    private $feeds = [
-        'InfoFunes' => 'https://infofunes.com.ar/rss.xml',
-        'La Voz de Funes' => 'https://lavozdefunes.com.ar/rss',
-        'Funes Hoy' => 'https://funeshoy.com.ar/feed/',
-        'El Occidental' => 'https://eloccidental.com.ar/feed/',
-        'Estacionline' => 'https://estacionline.com/feed/'
-    ];
+    private $feeds = [];
 
     /** @var array<string, string> Sitios sin RSS que se scrapean directamente */
-    private $scrapers = [
-        'FM Diez Funes' => 'https://www.fmdiezfunes.com.ar/noticias.php'
-    ];
+    private $scrapers = [];
 
     /** @param Database $db Instancia de la base de datos para persistir las noticias obtenidas */
     public function __construct(Database $db) {
         $this->db = $db;
         $this->logFile = __DIR__ . '/../data/aggregator.log';
         $this->statusFile = __DIR__ . '/../data/aggregator_status.json';
+        $this->feeds   = Config::getFeeds();
+        $this->scrapers = Config::getScrapers();
     }
 
     /**

@@ -9,14 +9,10 @@ declare(strict_types=1);
 class ArticleLoader
 {
     /** Dominios con hotlink protection: se accede a sus imágenes a través del proxy. */
-    private const PROXY_DOMAINS = [
-        'lavozdefunes.com.ar',
-        'estacionline.com',
-        'flex-assets.tadevel-cdn.com',
-        'funeshoy.com.ar',
-        'eloccidental.com.ar',
-        'fmdiezfunes.com.ar',
-    ];
+    private static function proxyDomains(): array
+    {
+        return Config::getProxyDomains();
+    }
 
     public function __construct(
         private readonly Database $db,
@@ -84,7 +80,7 @@ class ArticleLoader
 
         $imageHost  = strtolower(parse_url($rawImageUrl, PHP_URL_HOST) ?? '');
         $needsProxy = array_reduce(
-            self::PROXY_DOMAINS,
+            self::proxyDomains(),
             fn ($carry, $d) => $carry || $imageHost === $d || str_ends_with($imageHost, '.' . $d),
             false
         );
