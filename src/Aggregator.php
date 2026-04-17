@@ -117,6 +117,11 @@ class Aggregator
         
         $this->saveFeedCacheHeaders();
         $this->db->setLastUpdate(time());
+
+        // Reparar artículos recientes de la BD que quedaron sin imagen
+        // (ej: bug en extracción previo que ya fue corregido, o feeds que no incluyen imagen).
+        // Se ejecuta siempre de forma automática, sin necesidad de scripts manuales.
+        $this->repairRecentDbImages();
     }
 
     private function setSourceStatus(string $sourceName, array $status): void {
@@ -1056,6 +1061,41 @@ class Aggregator
         }
 
         return $scheme . '://' . $host . '/' . ltrim($raw, '/');
+    }
+
+    /**
+     * Repara artículos recientes (últimos 14 días) que están en la BD sin imagen.
+     * Se ejecuta al final de cada ciclo, limitado a 15 artículos para no impactar latencia.
+     * Garantiza que errores transitorios de extracción se corrijan en ciclos posteriores
+     * sin necesidad de scripts manuales ni intervención humana.
+     */
+    private function repairRecentDbImages(): void {
+        try {
+            $articles = $this->db->getRecentArticlesWithoutImage(15);
+        } catch (\Exception $e) {
+            $this->log('[WARN] repairRecentDbImages: ' . $e->getMessage());
+            return;
+        }
+
+        if (empty($articles)) {
+            return;
+        }
+
+        $this->log('Reparando ' . count($articles) . ' artículos sin imagen en BD...');
+        $repaired = 0;
+
+        foreach ($articles as $article) {
+            $image = $this->fetchOgImage($article['link']);
+            if ($image !== null && stripos($image, '.gif') === false && $this->isUsableImage($image)) {
+                $this->db->updateImageUrl((int)$article['id'], $image);
+                $this->log('[REPAIR] ID ' . $article['id'] . ' → ' . $image);
+                $repaired++;
+            }
+        }
+
+        if ($repaired > 0) {
+            $this->log("Imágenes reparadas automáticamente: {$repaired}");
+        }
     }
 
     /**

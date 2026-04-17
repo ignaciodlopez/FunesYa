@@ -305,6 +305,38 @@ class Database
     }
 
     /**
+     * Devuelve artículos recientes (últimos 14 días) sin imagen, para reparación automática.
+     *
+     * @param int $limit Máximo de artículos a devolver por ciclo
+     * @return array<int, array{id: int, link: string}>
+     */
+    public function getRecentArticlesWithoutImage(int $limit = 15): array {
+        $stmt = $this->pdo->prepare("
+            SELECT id, link
+            FROM news
+            WHERE (image_url IS NULL OR TRIM(image_url) = '')
+              AND pub_date >= datetime('now', '-14 days')
+              AND link NOT LIKE 'https://example.com%'
+            ORDER BY pub_date DESC
+            LIMIT :limit
+        ");
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Actualiza la URL de imagen de un artículo.
+     *
+     * @param int    $id       ID del artículo
+     * @param string $imageUrl Nueva URL de imagen
+     */
+    public function updateImageUrl(int $id, string $imageUrl): void {
+        $stmt = $this->pdo->prepare("UPDATE news SET image_url = :img WHERE id = :id");
+        $stmt->execute([':img' => $imageUrl, ':id' => $id]);
+    }
+
+    /**
      * Devuelve la lista de fuentes presentes en la base de datos, sin duplicados y ordenadas.
      *
      * @return array Lista de nombres de fuentes (strings)
