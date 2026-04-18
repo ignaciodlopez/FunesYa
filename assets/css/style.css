@@ -1,4 +1,54 @@
 /* ═══════════════════════════════════════
+   Fuentes locales (Inter + Outfit)
+   ══════════════════════════════════════ */
+
+/* Inter — latin-ext (caracteres ampliados: macrones, diacríticos, etc.) */
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: optional;
+    src: url('../fonts/inter-v20-latin-ext.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+                   U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF,
+                   U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* Inter — latin (cubre todos los caracteres españoles: á é í ó ú ñ ü ¡ ¿) */
+@font-face {
+    font-family: 'Inter';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: optional;
+    src: url('../fonts/inter-v20-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                   U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                   U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Outfit — latin-ext */
+@font-face {
+    font-family: 'Outfit';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: optional;
+    src: url('../fonts/outfit-v15-latin-ext.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+                   U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF,
+                   U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* Outfit — latin */
+@font-face {
+    font-family: 'Outfit';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: optional;
+    src: url('../fonts/outfit-v15-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                   U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                   U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* ═══════════════════════════════════════
    Variables y Reset
    ══════════════════════════════════════ */
 :root {
@@ -432,6 +482,35 @@ footer {
     font-size: 0.9rem;
 }
 
+.footer-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+}
+
+.footer-nav {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.footer-nav a {
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    transition: color 0.2s;
+}
+
+.footer-nav a:hover {
+    color: var(--accent-color);
+}
+
+.footer-copy {
+    font-size: 0.825rem;
+    color: var(--text-secondary);
+}
+
 .text-center {
     text-align: center;
 }
@@ -503,6 +582,28 @@ footer {
     }
 
     .pill-nav::-webkit-scrollbar { display: none; }
+
+    /* Fade de gradiente derecho: indica visualmente que hay más pills por deslizar */
+    .navbar nav {
+        position: relative;
+    }
+
+    .navbar nav::after {
+        content: '';
+        position: absolute;
+        right: 0;
+        top: 0;
+        bottom: 0;
+        width: 44px;
+        background: linear-gradient(to right, transparent, rgba(15, 17, 21, 0.92));
+        pointer-events: none;
+        border-radius: 0 28px 28px 0;
+        transition: opacity 0.25s ease;
+    }
+
+    .navbar nav.at-end::after {
+        opacity: 0;
+    }
 
     .pill {
         flex-shrink: 0;

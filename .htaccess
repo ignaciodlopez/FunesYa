@@ -56,7 +56,8 @@ Options -Indexes
     # CSP: 'unsafe-inline' en script-src es necesario para el código de Google Analytics
     # y los bloques JSON-LD (<script type="application/ld+json">).
     # 'unsafe-inline' en style-src es necesario por el bloque <style> en article.php.
-    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://www.google-analytics.com https://analytics.google.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self';"
+    # fonts.googleapis.com y fonts.gstatic.com eliminados: fuentes servidas localmente.
+    Header always set Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://www.google-analytics.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' https: data:; connect-src 'self' https://www.google-analytics.com https://analytics.google.com; frame-ancestors 'self'; base-uri 'self'; form-action 'self';"
 </IfModule>
 
 # ──────────────────────────────────────────────

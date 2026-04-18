@@ -1,0 +1,42 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * api/summary.php
+ * Genera (o devuelve desde caché) el resumen de un artículo usando Gemini.
+ * Llamado de forma asíncrona desde article.php para evitar bloquear el TTFB.
+ */
+
+ini_set('max_execution_time', '60');
+
+header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: public, max-age=86400');
+
+require_once __DIR__ . '/../src/Config.php';
+require_once __DIR__ . '/../src/Database.php';
+require_once __DIR__ . '/../src/ArticleSummarizer.php';
+
+$id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
+if ($id === null || $id === false || $id <= 0) {
+    http_response_code(400);
+    echo json_encode(['error' => 'ID inválido'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+$db  = new Database();
+$row = $db->getNewsById($id);
+
+if (!$row) {
+    http_response_code(404);
+    echo json_encode(['error' => 'Artículo no encontrado'], JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
+// Forzar llamada a Gemini aunque exista un snippet RSS en description
+$rowForGemini               = $row;
+$rowForGemini['description'] = null;
+
+$summarizer = new ArticleSummarizer($db);
+$summary    = $summarizer->getSummary($rowForGemini);
+
+echo json_encode(['summary' => $summary], JSON_UNESCAPED_UNICODE);

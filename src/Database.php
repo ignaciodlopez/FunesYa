@@ -240,6 +240,26 @@ class Database
     }
 
     /**
+     * Devuelve artículos recientes que aún no tienen un resumen completo.
+     * Se usa en el agregador para pre-generar resumenes en background.
+     *
+     * @return list<array>
+     */
+    public function getUnsummarizedRecent(int $limit = 20): array {
+        $stmt = $this->pdo->prepare("
+            SELECT * FROM news
+            WHERE description IS NULL
+               OR TRIM(description) = ''
+               OR (description LIKE '%...' AND LENGTH(description) < 500)
+            ORDER BY pub_date DESC
+            LIMIT :limit
+        ");
+        $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * Devuelve id y pub_date de todos los artículos para generar el sitemap XML.
      * Limitado a 50 000 URLs (límite de Google Sitemaps).
      *

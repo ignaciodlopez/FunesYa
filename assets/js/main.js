@@ -8,7 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const newsContainer = document.getElementById('news-container');
     const sourceFilters = document.getElementById('source-filters');
     const refreshBtn = document.getElementById('refresh-btn');
-    const loader = document.getElementById('loader');
+    const loader    = document.getElementById('loader');
     
     let currentSource = 'Todas';
     let availableSources = ['Todas'];
@@ -64,7 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {string} url - URL original de la imagen.
      * @returns {string}
      */
-    const proxyUrl = (url) => `api/img.php?url=${encodeURIComponent(url)}&w=640`;
+    const proxyUrl = (url, w = 640) => `api/img.php?url=${encodeURIComponent(url)}&w=${w}`;
 
     // Dominios con hotlink protection inyectados desde PHP (fuente única: Config::getProxyDomains()).
     // Si el objeto SSR no está disponible (test, iframe), usar lista vacía como fallback seguro.
@@ -79,15 +79,26 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {string} url - URL original de la imagen.
      * @returns {string}
      */
-    const resolveImgSrc = (url) => {
+    const resolveImgSrc = (url, w = 640) => {
         if (!hasUsableImage(url)) return '';
         try {
             const host = new URL(url).hostname;
             if (HOTLINK_DOMAINS.some(d => host === d || host.endsWith('.' + d))) {
-                return proxyUrl(url);
+                return proxyUrl(url, w);
             }
         } catch (_) { /* URL inválida: intentar directa */ }
         return url;
+    };
+
+    const buildImgSrcset = (url) => {
+        if (!hasUsableImage(url)) return '';
+        try {
+            const host = new URL(url).hostname;
+            if (HOTLINK_DOMAINS.some(d => host === d || host.endsWith('.' + d))) {
+                return `${proxyUrl(url, 320)} 320w, ${proxyUrl(url, 640)} 640w`;
+            }
+        } catch (_) { /* URL inválida */ }
+        return '';
     };
 
     const getSourceInitials = (source = '') => {
@@ -154,11 +165,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const hasImage = hasUsableImage(item.image_url);
         const imgSrc = hasImage ? resolveImgSrc(item.image_url) : '';
+        const imgSrcset = hasImage ? buildImgSrcset(item.image_url) : '';
+        const srcsetAttr = imgSrcset ? `srcset="${escHtml(imgSrcset)}" sizes="(max-width: 400px) 320px, 640px"` : '';
 
         card.innerHTML = `
             <div class="card-img-wrapper${hasImage ? '' : ' no-image'}" data-source="${escHtml(item.source)}">
                 ${hasImage
-                    ? `<img src="${escHtml(imgSrc)}" alt="${escHtml(item.title)}" loading="lazy" width="640" height="360">`
+                    ? `<img src="${escHtml(imgSrc)}" ${srcsetAttr} alt="${escHtml(item.title)}" loading="lazy" width="640" height="360">`
                     : buildNoImagePlaceholder(item.source)}
                 <span class="card-source">${escHtml(item.source)}</span>
             </div>
@@ -267,6 +280,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 
                 sourceFilters.appendChild(btn);
             });
+
+            // Resincronizar el fade del pill-nav tras reconstruir los botones
+            if (typeof window.__syncPillFadeOnFilterUpdate === 'function') {
+                window.__syncPillFadeOnFilterUpdate();
+            }
         }
     };
 
@@ -421,5 +439,22 @@ document.addEventListener('DOMContentLoaded', () => {
         // Fallback: base de datos vacía o sin PHP, cargar vía API
         fetchNews(true);
     }
+
+    // Pill-nav: indicador visual de scroll en móvil (fade derecho)
+    const pillNavEl   = document.getElementById('source-filters');
+    const pillNavHost = pillNavEl?.closest('nav');
+    if (pillNavEl && pillNavHost) {
+        const syncPillFade = () => {
+            const atEnd = pillNavEl.scrollLeft + pillNavEl.clientWidth >= pillNavEl.scrollWidth - 4;
+            pillNavHost.classList.toggle('at-end', atEnd);
+        };
+        pillNavEl.addEventListener('scroll', syncPillFade, { passive: true });
+        syncPillFade(); // Estado inicial
+
+        // Actualizar el fade también cuando cambian los filtros (JS los reconstruye)
+        const origUpdateFilters = window.__syncPillFadeOnFilterUpdate;
+        window.__syncPillFadeOnFilterUpdate = syncPillFade;
+    }
+
     startAutoRefresh();
 });

@@ -43,7 +43,12 @@ class ArticleLoader
         $ogImageUrl        = self::resolveOgImageUrl($article);
         $pubDateIso        = date('c', strtotime($article['pub_date']));
 
-        return compact('title', 'source', 'pubDate', 'imageUrl', 'externalLink', 'summaryParagraphs', 'ogImageUrl', 'pubDateIso');
+        $rawDesc        = $article['description'] ?? '';
+        $isRssSnippet   = $rawDesc !== '' && str_ends_with(rtrim($rawDesc), '...');
+        $needsAiSummary = (empty($rawDesc) || $isRssSnippet)
+            && !str_starts_with($article['link'], 'https://example.com');
+
+        return compact('title', 'source', 'pubDate', 'imageUrl', 'externalLink', 'summaryParagraphs', 'ogImageUrl', 'pubDateIso', 'needsAiSummary');
     }
 
     /**
@@ -111,16 +116,11 @@ class ArticleLoader
      */
     private function resolveSummary(array $article): array
     {
-        $rawSummary   = $article['description'];
-        $isRssSnippet = $rawSummary && str_ends_with(rtrim($rawSummary), '...');
+        $rawSummary = $article['description'] ?? '';
 
-        if ((!$rawSummary || $isRssSnippet) && !str_starts_with($article['link'], 'https://example.com')) {
-            $articleForSummary                = $article;
-            $articleForSummary['description'] = null; // forzar llamada a Gemini
-            $rawSummary = $this->summarizer->getSummary($articleForSummary) ?? $rawSummary;
-        }
-
-        if (!$rawSummary) {
+        // La generación por Gemini se realiza de forma asíncrona via api/summary.php
+        // para no bloquear el renderizado de la página (evita TTFB alto).
+        if (empty($rawSummary) || str_ends_with(rtrim($rawSummary), '...')) {
             return [];
         }
 

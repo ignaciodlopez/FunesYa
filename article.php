@@ -30,6 +30,7 @@ $externalLink      = $data['externalLink'];
 $summaryParagraphs = $data['summaryParagraphs'];
 $ogImageUrl        = $data['ogImageUrl'];
 $pubDateIso        = $data['pubDateIso'];
+$needsAiSummary    = $data['needsAiSummary'];
 
 // Valores para SEO (decodificados de HTML para uso en JSON-LD)
 $canonicalUrl    = 'https://www.funesya.com.ar/article.php?id=' . $id;
@@ -40,11 +41,13 @@ $metaDescription = mb_strlen($rawDescription) > 160
     ? mb_substr($rawDescription, 0, 157) . '…'
     : ($rawDescription !== '' ? $rawDescription : $rawTitle);
 $metaDescriptionEsc = htmlspecialchars($metaDescription, ENT_QUOTES, 'UTF-8');
+header('Cache-Control: public, max-age=3600, stale-while-revalidate=86400');
 ?>
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" style="background:#0f1115">
 <head>
     <meta charset="UTF-8">
+    <meta name="color-scheme" content="dark">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <!-- SEO básico -->
@@ -115,13 +118,14 @@ $metaDescriptionEsc = htmlspecialchars($metaDescription, ENT_QUOTES, 'UTF-8');
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT) ?>
     </script>
 
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@400;600;700&display=optional" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Outfit:wght@400;600;700&display=optional"></noscript>
+    <!-- Fuentes locales: Inter y Outfit servidas desde assets/fonts/ (sin dependencia externa) -->
+    <link rel="preload" as="font" href="assets/fonts/inter-v20-latin.woff2" type="font/woff2" crossorigin>
+    <link rel="preload" as="font" href="assets/fonts/outfit-v15-latin.woff2" type="font/woff2" crossorigin>
+    <!-- CSS sincrónico: style.css ya está en caché del browser por el paso previo por inicio.
+         Cargarlo de forma bloqueante (sin el truco preload/onload) elimina el flash de página
+         sin estilos (FOUC) que ocurre cuando el CSS se aplica de forma asíncrona post-render. -->
     <?php $cssV = filemtime(__DIR__ . '/assets/css/style.css'); ?>
-    <link rel="preload" as="style" href="assets/css/style.css?v=<?= $cssV ?>" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="assets/css/style.css?v=<?= $cssV ?>"></noscript>
+    <link rel="stylesheet" href="assets/css/style.css?v=<?= $cssV ?>">
     <!-- Google Analytics: cargado después del evento load para no bloquear FCP/LCP/TBT -->
     <script>
     window.addEventListener('load', function () {
@@ -214,6 +218,24 @@ $metaDescriptionEsc = htmlspecialchars($metaDescription, ENT_QUOTES, 'UTF-8');
             font-style: italic;
             margin-bottom: 40px;
             font-size: .95rem;
+        }
+
+        /* Skeleton de carga para el resumen async */
+        .summary-skeleton {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .skeleton-line {
+            height: 1em;
+            border-radius: 4px;
+            background: linear-gradient(90deg, var(--card-border) 25%, rgba(255,255,255,.08) 50%, var(--card-border) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.4s infinite;
+        }
+        @keyframes shimmer {
+            0%   { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
         }
 
         .external-btn {
@@ -319,7 +341,17 @@ $metaDescriptionEsc = htmlspecialchars($metaDescription, ENT_QUOTES, 'UTF-8');
                 >
             <?php endif; ?>
 
-            <?php if (!empty($summaryParagraphs)): ?>
+            <?php if ($needsAiSummary): ?>
+                <div id="summary-container" class="article-description" data-id="<?= $id ?>" aria-live="polite" aria-label="Cargando resumen…">
+                    <div class="summary-skeleton" aria-hidden="true">
+                        <div class="skeleton-line" style="width:92%"></div>
+                        <div class="skeleton-line" style="width:78%"></div>
+                        <div class="skeleton-line" style="width:85%"></div>
+                        <div class="skeleton-line" style="width:60%"></div>
+                        <div class="skeleton-line" style="width:72%"></div>
+                    </div>
+                </div>
+            <?php elseif (!empty($summaryParagraphs)): ?>
                 <div class="article-description">
                     <?php foreach ($summaryParagraphs as $para): ?>
                         <p><?= $para ?></p>
@@ -341,9 +373,44 @@ $metaDescriptionEsc = htmlspecialchars($metaDescription, ENT_QUOTES, 'UTF-8');
         </div>
     </main>
 
+    <?php if ($needsAiSummary): ?>
+    <script>
+    (function () {
+        var container = document.getElementById('summary-container');
+        if (!container) return;
+        var articleId = container.dataset.id;
+        fetch('api/summary.php?id=' + encodeURIComponent(articleId))
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                container.innerHTML = '';
+                if (data.summary) {
+                    var paras = data.summary.split('\n\n');
+                    paras.forEach(function (text) {
+                        text = text.trim();
+                        if (!text) return;
+                        var p = document.createElement('p');
+                        p.textContent = text;
+                        container.appendChild(p);
+                    });
+                } else {
+                    container.outerHTML = '<p class="no-description">No fue posible generar un resumen para esta noticia.</p>';
+                }
+            })
+            .catch(function () {
+                container.outerHTML = '<p class="no-description">No fue posible generar un resumen para esta noticia.</p>';
+            });
+    })();
+    </script>
+    <?php endif; ?>
+
     <footer>
-        <div class="container text-center" style="padding: 20px 0; color: var(--text-secondary); font-size: .8rem;">
-            <p>FunesYa &copy; <?= date('Y') ?>. Noticias en tiempo real de Funes, Santa Fe.</p>
+        <div class="container footer-content">
+            <nav class="footer-nav" aria-label="Navegación del pie de página">
+                <a href="index.php">Inicio</a>
+                <a href="about.php">Acerca de</a>
+                <a href="rss.xml" target="_blank" rel="noopener noreferrer">RSS</a>
+            </nav>
+            <p class="footer-copy">FunesYa &copy; <?= date('Y') ?>. Noticias en tiempo real de Funes, Santa Fe.</p>
         </div>
     </footer>
 </body>

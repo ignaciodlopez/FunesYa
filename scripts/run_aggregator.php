@@ -34,10 +34,24 @@ try {
     require_once __DIR__ . '/../src/Config.php';
     require_once __DIR__ . '/../src/Database.php';
     require_once __DIR__ . '/../src/Aggregator.php';
+    require_once __DIR__ . '/../src/ArticleSummarizer.php';
 
     $db  = new Database();
     $agg = new Aggregator($db);
     $agg->fetchAll();
+
+    // Pre-generar resumenes para artículos recientes que aún no los tienen.
+    // Así cuando el usuario visita el artículo, el resumen ya está en DB.
+    $summarizer   = new ArticleSummarizer($db);
+    $unsummarized = $db->getUnsummarizedRecent(20);
+    foreach ($unsummarized as $article) {
+        if (str_starts_with((string)($article['link'] ?? ''), 'https://example.com')) {
+            continue;
+        }
+        $forSummary                = $article;
+        $forSummary['description'] = null; // forzar scraping + Gemini
+        $summarizer->getSummary($forSummary);
+    }
 } finally {
     // Liberar el lock y cerrar antes de eliminar el archivo
     flock($lock, LOCK_UN);

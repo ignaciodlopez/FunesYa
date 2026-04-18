@@ -29,6 +29,15 @@ function ssrResolveImgSrc(string $url, int $w = 640): string {
     return htmlspecialchars($url, ENT_QUOTES, 'UTF-8');
 }
 
+function ssrBuildSrcset(string $url, array $widths = [320, 640]): string {
+    if (!ssrIsUsableImage($url) || !ssrNeedsProxy($url)) return '';
+    $parts = [];
+    foreach ($widths as $w) {
+        $parts[] = 'api/img.php?url=' . urlencode($url) . '&w=' . $w . ' ' . $w . 'w';
+    }
+    return implode(', ', $parts);
+}
+
 function ssrSourceInitials(string $source): string {
     $words = preg_split('/\s+/', trim($source), -1, PREG_SPLIT_NO_EMPTY);
     if (!$words) return 'FN';
@@ -63,11 +72,13 @@ foreach ($ssrNews as $_item) {
         break;
     }
 }
+header('Cache-Control: public, max-age=60, stale-while-revalidate=120');
 ?>
 <!DOCTYPE html>
-<html lang="es">
+<html lang="es" style="background:#0f1115">
 <head>
     <meta charset="UTF-8">
+    <meta name="color-scheme" content="dark">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
     <!-- SEO básico -->
@@ -118,18 +129,9 @@ foreach ($ssrNews as $_item) {
     }
     </script>
 
-    <!-- Google Fonts: carga asíncrona para no bloquear el render (FCP) -->
-    <!-- preconnect reduce la latencia DNS+TCP+TLS antes de que el CSS las solicite -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <!-- display=optional: si la fuente no carga antes del primer render, se usa la fuente
-         del sistema sin hacer swap posterior. Elimina el CLS causado por FOUT. -->
-    <link rel="preload" as="style"
-          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Outfit:wght@400;600;700&display=optional"
-          onload="this.onload=null;this.rel='stylesheet'">
-    <noscript>
-        <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Outfit:wght@400;600;700&display=optional">
-    </noscript>
+    <!-- Fuentes locales: Inter y Outfit servidas desde assets/fonts/ (sin dependencia externa) -->
+    <link rel="preload" as="font" href="assets/fonts/inter-v20-latin.woff2" type="font/woff2" crossorigin>
+    <link rel="preload" as="font" href="assets/fonts/outfit-v15-latin.woff2" type="font/woff2" crossorigin>
     <!-- Preload de la imagen LCP: el browser la descarga en paralelo antes de parsear el body -->
     <?php if ($lcpImageUrl !== ''): ?>
     <link rel="preload" as="image" href="<?= $lcpImageUrl ?>" fetchpriority="high">
@@ -241,8 +243,9 @@ foreach ($ssrNews as $_item) {
             <?php foreach ($ssrNews as $i => $ssrItem):
                 $rawImg   = trim((string)($ssrItem['image_url'] ?? ''));
                 $hasImg   = ssrIsUsableImage($rawImg);
-                $imgSrc   = $hasImg ? ssrResolveImgSrc($rawImg, 640) : '';
-                $t        = htmlspecialchars($ssrItem['title'],  ENT_QUOTES, 'UTF-8');
+                $imgSrc    = $hasImg ? ssrResolveImgSrc($rawImg, 640) : '';
+                $imgSrcset = $hasImg ? ssrBuildSrcset($rawImg) : '';
+                $t         = htmlspecialchars($ssrItem['title'],  ENT_QUOTES, 'UTF-8');
                 $s        = htmlspecialchars($ssrItem['source'], ENT_QUOTES, 'UTF-8');
                 $initials = htmlspecialchars(ssrSourceInitials($ssrItem['source']), ENT_QUOTES, 'UTF-8');
                 $dateStr  = ssrFormatDate($ssrItem['pub_date']);
@@ -252,6 +255,7 @@ foreach ($ssrNews as $_item) {
                 <div class="card-img-wrapper<?= $hasImg ? '' : ' no-image' ?>" data-source="<?= $s ?>">
                     <?php if ($hasImg): ?>
                         <img src="<?= $imgSrc ?>"
+                             <?= $imgSrcset !== '' ? 'srcset="' . $imgSrcset . '" sizes="(max-width: 400px) 320px, 640px"' : '' ?>
                              alt="<?= $t ?>"
                              data-original-src="<?= $rawImgEsc ?>"
                              <?= $i === 0 ? 'fetchpriority="high"' : 'loading="lazy"' ?>
@@ -315,8 +319,12 @@ foreach ($ssrNews as $_item) {
 
     <!-- Pie de página del sitio -->
     <footer>
-        <div class="container text-center">
-            <p>FunesYa &copy; <?= date('Y') ?>. Noticias en tiempo real de Funes, Santa Fe.</p>
+        <div class="container footer-content">
+            <nav class="footer-nav" aria-label="Navegación del pie de página">
+                <a href="about.php">Acerca de</a>
+                <a href="rss.xml" target="_blank" rel="noopener noreferrer">RSS</a>
+            </nav>
+            <p class="footer-copy">FunesYa &copy; <?= date('Y') ?>. Noticias en tiempo real de Funes, Santa Fe.</p>
         </div>
     </footer>
 
