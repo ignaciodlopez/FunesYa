@@ -1,6 +1,10 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ImageCoverageAlertService.php';
+require_once __DIR__ . '/TelegramNotifier.php';
+require_once __DIR__ . '/FileAlertStateStore.php';
+
 /**
  * Agrega noticias desde múltiples fuentes RSS locales de Funes.
  * Genera datos de ejemplo (mock) cuando un feed no está disponible.
@@ -10,6 +14,7 @@ class Aggregator
     private Database $db;
     private string $logFile;
     private string $statusFile;
+    private ImageCoverageAlertService $imageCoverageAlertService;
     private array $cycleStatus = [];
 
     private const USER_AGENT =
@@ -59,6 +64,21 @@ class Aggregator
         $this->statusFile = __DIR__ . '/../data/aggregator_status.json';
         $this->feeds   = Config::getFeeds();
         $this->scrapers = Config::getScrapers();
+
+        $minItems = max(1, (int)(Config::get('IMAGE_ALERT_MIN_ITEMS', '8') ?? '8'));
+        $missingRate = (float)(Config::get('IMAGE_ALERT_MISSING_RATE', '0.40') ?? '0.40');
+        $cooldownSeconds = max(0, (int)(Config::get('IMAGE_ALERT_COOLDOWN_SECONDS', '21600') ?? '21600'));
+
+        $this->imageCoverageAlertService = new ImageCoverageAlertService(
+            new TelegramNotifier(),
+            new FileAlertStateStore(__DIR__ . '/../data/image_alert_state.json'),
+            function (string $message): void {
+                $this->log($message);
+            },
+            $minItems,
+            $missingRate,
+            $cooldownSeconds
+        );
     }
 
     /**
@@ -430,6 +450,8 @@ class Aggregator
             ];
         }
 
+        $this->imageCoverageAlertService->notifyIfNeeded($sourceName, $items);
+
         $this->log("[OK] {$sourceName}: " . count($items) . " artículos obtenidos (RSS)");
         $this->setSourceStatus($sourceName, [
             'state' => 'ok',
@@ -513,6 +535,8 @@ class Aggregator
                 'description' => $description ?: null,
             ];
         }
+
+        $this->imageCoverageAlertService->notifyIfNeeded($sourceName, $items);
 
         $this->log("[OK] {$sourceName}: " . count($items) . " artículos obtenidos (Atom)");
         $this->setSourceStatus($sourceName, [
@@ -843,6 +867,8 @@ class Aggregator
             }
         }
 
+        $this->imageCoverageAlertService->notifyIfNeeded($sourceName, $items);
+
         $this->setSourceStatus($sourceName, [
             'state' => 'ok',
             'type' => 'scraper',
@@ -865,28 +891,52 @@ class Aggregator
      */
     private function fetchOgImage(string $url): ?string
     {
-        $ctx = stream_context_create([
-            'http' => [
-                'timeout'         => 8,
-                'user_agent'      => self::USER_AGENT,
-                'follow_location' => 1,
-                'max_redirects'   => 3,
-                'header'          => "Accept: text/html,*/*\r\nAccept-Language: es-AR,es;q=0.9\r\nRange: bytes=0-30719\r\n",
-            ],
-            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
-        ]);
+        // Intento rápido: leer los primeros KB (normalmente ahí está el <head>).
+        // Si no alcanza para detectar imagen, se reintenta sin Range leyendo más bytes.
+        $readHtml = function (bool $useRange, int $maxBytes) use ($url): ?string {
+            $headers = "Accept: text/html,*/*\r\nAccept-Language: es-AR,es;q=0.9\r\n";
+            if ($useRange) {
+                $headers .= "Range: bytes=0-" . ($maxBytes - 1) . "\r\n";
+            }
 
-        $fp = @fopen($url, 'rb', false, $ctx);
-        if ($fp === false) {
+            $ctx = stream_context_create([
+                'http' => [
+                    'timeout'         => 8,
+                    'user_agent'      => self::USER_AGENT,
+                    'follow_location' => 1,
+                    'max_redirects'   => 3,
+                    'header'          => $headers,
+                ],
+                'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+            ]);
+
+            $fp = @fopen($url, 'rb', false, $ctx);
+            if ($fp === false) {
+                return null;
+            }
+
+            $html = '';
+            while (!feof($fp) && strlen($html) < $maxBytes) {
+                $chunk = fread($fp, 8192);
+                if ($chunk === false) {
+                    break;
+                }
+                $html .= $chunk;
+
+                // Cortar temprano cuando ya cerró <head>: reduce trabajo en páginas pesadas.
+                if (stripos($html, '</head>') !== false && strlen($html) >= 8192) {
+                    break;
+                }
+            }
+            fclose($fp);
+
+            return $html !== '' ? $html : null;
+        };
+
+        $html = $readHtml(true, 30720);
+        if ($html === null) {
             return null;
         }
-        $html = '';
-        while (!feof($fp) && strlen($html) < 30720) {
-            $chunk = fread($fp, 8192);
-            if ($chunk === false) break;
-            $html .= $chunk;
-        }
-        fclose($fp);
 
         $parsed = parse_url($url);
         $scheme = $parsed['scheme'] ?? 'https';
@@ -962,6 +1012,115 @@ class Aggregator
             $resolved = $this->normalizeImageUrl($resolved);
             if ($this->isUsableImage($resolved)) {
                 return $resolved;
+            }
+        }
+
+        // Fallback robusto: algunos sitios no devuelven bien Range o ubican metadatos
+        // más allá del primer bloque. Reintentar sin Range con mayor ventana.
+        $htmlFull = $readHtml(false, 180000);
+        if ($htmlFull !== null && $htmlFull !== $html) {
+            $retryCandidates = [];
+
+            if (preg_match_all('/<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']/i', $htmlFull, $m1)) {
+                foreach ($m1[1] as $raw) {
+                    $raw = trim($raw);
+                    if ($raw !== '') {
+                        $retryCandidates[] = $raw;
+                    }
+                }
+            }
+            if (preg_match_all('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']/i', $htmlFull, $m2)) {
+                foreach ($m2[1] as $raw) {
+                    $raw = trim($raw);
+                    if ($raw !== '') {
+                        $retryCandidates[] = $raw;
+                    }
+                }
+            }
+            if (preg_match_all('/<meta[^>]+(?:name|property)=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']/i', $htmlFull, $m3)) {
+                foreach ($m3[1] as $raw) {
+                    $raw = trim($raw);
+                    if ($raw !== '') {
+                        $retryCandidates[] = $raw;
+                    }
+                }
+            }
+            if (preg_match_all('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']twitter:image(?::src)?["\']/i', $htmlFull, $m4)) {
+                foreach ($m4[1] as $raw) {
+                    $raw = trim($raw);
+                    if ($raw !== '') {
+                        $retryCandidates[] = $raw;
+                    }
+                }
+            }
+            if (preg_match_all('/"image"\s*:\s*"([^"]+)"/i', $htmlFull, $m5)) {
+                foreach ($m5[1] as $raw) {
+                    $raw = trim($raw);
+                    if ($raw !== '') {
+                        $retryCandidates[] = $raw;
+                    }
+                }
+            }
+
+            foreach (array_unique($retryCandidates) as $raw) {
+                $resolved = $this->resolveImageUrl($raw, $scheme, $host);
+                if ($resolved === null) {
+                    continue;
+                }
+
+                $resolved = $this->normalizeImageUrl($resolved);
+                if ($this->isUsableImage($resolved)) {
+                    return $resolved;
+                }
+            }
+        }
+
+        // Fallback WordPress/oEmbed: algunos temas no publican og:image pero sí
+        // exponen thumbnail_url en /wp-json/oembed/1.0/embed.
+        $oembedSource = $htmlFull ?? $html;
+        if (preg_match('/<link[^>]+type=["\']application\/json\+oembed["\'][^>]+href=["\']([^"\']+)["\']/i', $oembedSource, $om)
+            || preg_match('/<link[^>]+href=["\']([^"\']+)["\'][^>]+type=["\']application\/json\+oembed["\']/i', $oembedSource, $om)) {
+            $oembedUrl = trim(html_entity_decode($om[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            $oembedUrl = $this->resolveImageUrl($oembedUrl, $scheme, $host);
+
+            if ($oembedUrl !== null && str_starts_with($oembedUrl, 'http')) {
+                $ctx = stream_context_create([
+                    'http' => [
+                        'timeout'         => 8,
+                        'user_agent'      => self::USER_AGENT,
+                        'follow_location' => 1,
+                        'max_redirects'   => 3,
+                        'header'          => "Accept: application/json,text/plain,*/*\r\n",
+                    ],
+                    'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+                ]);
+
+                $oembedRaw = @file_get_contents($oembedUrl, false, $ctx);
+                if ($oembedRaw !== false && $oembedRaw !== '') {
+                    $oembed = json_decode($oembedRaw, true);
+                    if (is_array($oembed)) {
+                        $jsonCandidates = [
+                            trim((string)($oembed['thumbnail_url'] ?? '')),
+                            trim((string)($oembed['url'] ?? '')),
+                        ];
+
+                        foreach ($jsonCandidates as $cand) {
+                            if ($cand === '') {
+                                continue;
+                            }
+
+                            $resolved = $this->resolveImageUrl($cand, $scheme, $host);
+                            if ($resolved === null) {
+                                continue;
+                            }
+
+                            $resolved = $this->normalizeImageUrl($resolved);
+                            if ($this->isUsableImage($resolved)) {
+                                return $resolved;
+                            }
+                        }
+                    }
+                }
             }
         }
 
