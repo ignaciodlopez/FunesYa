@@ -73,16 +73,61 @@ class ArticleSummarizer
     }
 
     /**
+     * Genera un resumen a partir de un texto ya conocido (p. ej. snippet del RSS).
+     * Llama directamente a Gemini sin necesidad de scrapear la URL del artículo.
+     * Guarda el resultado en la base de datos si tiene éxito.
+     *
+     * @param string $text Texto de entrada para Gemini
+     * @param int    $id   ID del artículo en la base de datos
+     */
+    public function generateFromText(string $text, int $id): ?string
+    {
+        $summary = $this->callGemini($text) ?? $this->fallbackSummary($text);
+
+        if ($summary !== null) {
+            $this->db->saveSummary($id, $summary);
+        }
+
+        return $summary;
+    }
+
+    /**
      * Descarga el artículo y extrae sus párrafos de texto significativo.
      */
     private function scrapeText(string $url): ?string
     {
+        $html = $this->fetchHtmlForScraping($url, true);
+
+        // Algunos servidores rechazan Range requests para contenido dinámico (HTTP 416).
+        // En ese caso reintentamos sin el header Range para obtener la página completa.
+        if ($html === null) {
+            $html = $this->fetchHtmlForScraping($url, false);
+        }
+
+        if ($html === null) {
+            return null;
+        }
+
+        return $this->extractTextFromHtml($html);
+    }
+
+    /**
+     * Descarga el HTML de una URL, opcionalmente usando Range para limitar el tamaño.
+     * Retorna null si el servidor rechaza la petición o no devuelve contenido.
+     */
+    private function fetchHtmlForScraping(string $url, bool $useRange): ?string
+    {
+        $extraHeaders = "Accept: text/html,*/*\r\nAccept-Language: es-AR,es;q=0.9\r\n";
+        if ($useRange) {
+            $extraHeaders .= "Range: bytes=0-" . (self::SCRAPE_MAX_BYTES - 1) . "\r\n";
+        }
+
         $ctx = stream_context_create([
             'http' => [
                 'timeout'         => self::HTTP_TIMEOUT,
                 'user_agent'      => self::SCRAPE_USER_AGENT,
                 'follow_location' => 1,
-                'header'          => "Accept: text/html,*/*\r\nAccept-Language: es-AR,es;q=0.9\r\nRange: bytes=0-" . (self::SCRAPE_MAX_BYTES - 1) . "\r\n",
+                'header'          => $extraHeaders,
             ],
             'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
         ]);
@@ -111,6 +156,16 @@ class ArticleSummarizer
             }
         }
 
+        return $html;
+    }
+
+    /**
+     * Parsea un bloque de HTML y extrae párrafos de texto significativo.
+     * Primero busca en etiquetas <p>; si no encuentra nada, intenta bloques <div>
+     * con suficiente contenido de texto (fallback para sitios con layouts no semánticos).
+     */
+    private function extractTextFromHtml(string $html): ?string
+    {
         libxml_use_internal_errors(true);
         $dom = new DOMDocument();
         $dom->loadHTML('<?xml encoding="UTF-8">' . $html);
@@ -130,6 +185,32 @@ class ArticleSummarizer
             }
             if (count($paragraphs) >= self::MAX_PARAGRAPHS) {
                 break;
+            }
+        }
+
+        // Fallback: si no hay <p> significativos, intentar extraer texto de <div>
+        // útil para CMS que no usan marcado semántico de párrafos.
+        if (empty($paragraphs)) {
+            foreach ($dom->getElementsByTagName('div') as $div) {
+                // Solo considerar divs sin hijos de tipo div (evita contenedores padres)
+                $hasChildDivs = false;
+                foreach ($div->childNodes as $child) {
+                    if ($child instanceof DOMElement && $child->tagName === 'div') {
+                        $hasChildDivs = true;
+                        break;
+                    }
+                }
+                if ($hasChildDivs) {
+                    continue;
+                }
+
+                $text = trim($div->textContent);
+                if (mb_strlen($text) > self::MIN_PARA_LENGTH * 2) {
+                    $paragraphs[] = $text;
+                }
+                if (count($paragraphs) >= self::MAX_PARAGRAPHS) {
+                    break;
+                }
             }
         }
 
