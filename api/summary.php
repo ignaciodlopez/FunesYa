@@ -33,10 +33,20 @@ if (!$row) {
 }
 
 // Forzar llamada a Gemini aunque exista un snippet RSS en description
-$rowForGemini               = $row;
+$originalSnippet             = $row['description'] ?? null;
+$rowForGemini                = $row;
 $rowForGemini['description'] = null;
 
 $summarizer = new ArticleSummarizer($db);
 $summary    = $summarizer->getSummary($rowForGemini);
+
+// Fallback: si el scraping falló pero hay un snippet del RSS, usarlo como texto de entrada.
+// Esto cubre servidores que rechazan el scraping pero sí publican resúmenes en el feed.
+if ($summary === null && $originalSnippet !== null) {
+    $snippet = trim(rtrim(trim($originalSnippet), '.'));
+    if (mb_strlen($snippet, 'UTF-8') > 80) {
+        $summary = $summarizer->generateFromText($snippet, (int)$row['id']);
+    }
+}
 
 echo json_encode(['summary' => $summary], JSON_UNESCAPED_UNICODE);
