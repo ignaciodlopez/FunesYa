@@ -3,28 +3,55 @@
  * Router para el servidor de desarrollo built-in de PHP.
  * Úsalo con: php -S 127.0.0.1:9000 router.php
  *
- * Replica las reglas del .htaccess para que las URLs amigables
- * funcionen igual que en producción con Apache.
- * El document root en desarrollo es public/ (equivalente a lo que Apache sirve).
+ * El document root del servidor es la raíz del proyecto, pero los archivos
+ * web viven en public/. El router los resuelve manualmente porque `return false`
+ * solo funciona cuando el archivo está en el document root del servidor.
  */
 
-$uri = $_SERVER['REQUEST_URI'];
-
-// Quitar query string para evaluar el path
+$uri  = $_SERVER['REQUEST_URI'];
 $path = parse_url($uri, PHP_URL_PATH);
 
 // /articulo/ID-slug → public/article.php?id=ID
 if (preg_match('#^/articulo/(\d+)#', $path, $m)) {
     $_GET['id'] = (int)$m[1];
     require __DIR__ . '/public/article.php';
-    return;
+    return true;
 }
 
-// Servir archivos estáticos que existen dentro de public/ (CSS, JS, imágenes, fuentes, etc.)
 $file = __DIR__ . '/public' . $path;
+
 if ($path !== '/' && file_exists($file) && !is_dir($file)) {
-    return false; // El servidor built-in sirve el archivo directamente
+    // Archivos PHP de public/ (api/*.php, sitemap.php, etc.)
+    if (str_ends_with($file, '.php')) {
+        require $file;
+        return true;
+    }
+
+    // Archivos estáticos: servir manualmente desde public/
+    // (return false no funciona porque el doc root del servidor es la raíz, no public/)
+    static $mime = [
+        'css'   => 'text/css',
+        'js'    => 'application/javascript; charset=utf-8',
+        'woff2' => 'font/woff2',
+        'woff'  => 'font/woff',
+        'ttf'   => 'font/ttf',
+        'svg'   => 'image/svg+xml',
+        'png'   => 'image/png',
+        'jpg'   => 'image/jpeg',
+        'jpeg'  => 'image/jpeg',
+        'gif'   => 'image/gif',
+        'ico'   => 'image/x-icon',
+        'webp'  => 'image/webp',
+        'xml'   => 'application/xml',
+        'txt'   => 'text/plain',
+        'json'  => 'application/json',
+    ];
+    $ext = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+    header('Content-Type: ' . ($mime[$ext] ?? 'application/octet-stream'));
+    readfile($file);
+    return true;
 }
 
 // Cualquier otra ruta → public/index.php
 require __DIR__ . '/public/index.php';
+return true;
