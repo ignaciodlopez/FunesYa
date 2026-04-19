@@ -31,8 +31,9 @@ if (!$row) {
     exit;
 }
 
-// Forzar llamada a Gemini aunque exista un snippet RSS en description
-$originalSnippet             = $row['description'] ?? null;
+// Forzar llamada a Gemini aunque exista un snippet RSS en description.
+// Preferir rss_snippet (original del feed, nunca sobreescrito) sobre description.
+$originalSnippet             = $row['rss_snippet'] ?? $row['description'] ?? null;
 $rowForGemini                = $row;
 $rowForGemini['description'] = null;
 

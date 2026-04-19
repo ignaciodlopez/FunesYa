@@ -21,7 +21,7 @@ class ArticleSummarizer
     private const MIN_PARA_LENGTH = 60;
     private const MAX_PARAGRAPHS  = 8;
     private const MAX_TEXT_CHARS  = 4000;   // ~1 000 tokens; evita derrochar cuota de Gemini
-    private const SCRAPE_MAX_BYTES = 51200; // 50 KB: suficiente para extraer párrafos del artículo
+    private const SCRAPE_MAX_BYTES = 153600; // 150 KB: cubre sitios con cabeceras JS pesadas
     private const GEMINI_MIN_INTERVAL_MS = 350; // Mínimo entre llamadas a Gemini (ms)
     private const GEMINI_ENDPOINT =
         'https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent';
@@ -62,6 +62,20 @@ class ArticleSummarizer
 
         $text = $this->scrapeText($article['link']);
         if ($text === null) {
+            // Fallback: si el scraping falla pero hay un snippet del RSS, usarlo como texto.
+            $rssSnippet = trim((string)($article['rss_snippet'] ?? ''));
+            if ($rssSnippet !== '' && mb_strlen($rssSnippet, 'UTF-8') > 80) {
+                $this->log("[INFO] Scraping falló para ID {$article['id']}, usando rss_snippet como fallback");
+                $summary = $this->callGemini($rssSnippet);
+                $summary = $this->finalizeSummary($summary);
+                if ($summary !== null) {
+                    $this->db->saveSummary((int)$article['id'], $summary);
+                    $this->db->clearSummaryRetryAt((int)$article['id']);
+                    return $summary;
+                }
+            } else {
+                $this->log("[INFO] Scraping falló para ID {$article['id']}, sin rss_snippet disponible");
+            }
             $this->db->setSummaryRetryAt((int)$article['id'], time() + 3600);
             return null;
         }

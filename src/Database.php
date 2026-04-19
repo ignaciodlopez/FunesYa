@@ -66,6 +66,21 @@ class Database
             // La columna ya existe
         }
 
+        // Migración: snippet original del feed RSS, nunca sobreescrito por el resumen IA.
+        // Permite usar el texto del feed como entrada a Gemini cuando el scraping falla.
+        try {
+            $this->pdo->exec("ALTER TABLE news ADD COLUMN rss_snippet TEXT");
+        } catch (\Exception $e) {
+            // La columna ya existe
+        }
+        // Poblar rss_snippet para artículos existentes que aún tienen el snippet en description.
+        $this->pdo->exec("
+            UPDATE news SET rss_snippet = description
+            WHERE rss_snippet IS NULL
+              AND description IS NOT NULL
+              AND TRIM(description) <> ''
+        ");
+
         // Índices de rendimiento para las queries más frecuentes.
         // idx_pub_date: acelera ORDER BY pub_date DESC (lista principal).
         // idx_source_date: acelera WHERE source = ? ORDER BY pub_date DESC (filtros por fuente).
@@ -123,8 +138,8 @@ class Database
      */
     public function saveNews(array $newsItems): int {
         $stmt = $this->pdo->prepare("
-            INSERT INTO news (title, link, image_url, source, pub_date, description, canonical_key)
-            VALUES (:title, :link, :image_url, :source, :pub_date, :description, :canonical_key)
+            INSERT INTO news (title, link, image_url, source, pub_date, description, canonical_key, rss_snippet)
+            VALUES (:title, :link, :image_url, :source, :pub_date, :description, :canonical_key, :description)
             ON CONFLICT(link) DO UPDATE SET
                 image_url = CASE
                     WHEN (news.image_url IS NULL OR TRIM(news.image_url) = '' OR news.image_url LIKE 'https://picsum.photos/%' OR news.image_url LIKE 'https://images.unsplash.com/%')
@@ -142,6 +157,11 @@ class Database
                          AND excluded.description IS NOT NULL AND TRIM(excluded.description) <> ''
                     THEN excluded.description
                     ELSE news.description
+                END,
+                rss_snippet = CASE
+                    WHEN excluded.rss_snippet IS NOT NULL AND TRIM(excluded.rss_snippet) <> ''
+                    THEN excluded.rss_snippet
+                    ELSE news.rss_snippet
                 END,
                 pub_date = CASE
                     WHEN excluded.pub_date > news.pub_date THEN excluded.pub_date
