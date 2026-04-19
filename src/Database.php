@@ -58,6 +58,14 @@ class Database
             WHERE canonical_key IS NOT NULL
         ");
 
+        // Migración: timestamp para cola de reintentos de resumen IA.
+        // Cuando Gemini falla, se programa un reintento en 1 hora.
+        try {
+            $this->pdo->exec("ALTER TABLE news ADD COLUMN summary_retry_at DATETIME");
+        } catch (\Exception $e) {
+            // La columna ya existe
+        }
+
         // Índices de rendimiento para las queries más frecuentes.
         // idx_pub_date: acelera ORDER BY pub_date DESC (lista principal).
         // idx_source_date: acelera WHERE source = ? ORDER BY pub_date DESC (filtros por fuente).
@@ -256,10 +264,13 @@ class Database
     public function getUnsummarizedRecent(int $limit = 20): array {
         $stmt = $this->pdo->prepare("
             SELECT * FROM news
-            WHERE description IS NULL
-               OR TRIM(description) = ''
-                    OR LENGTH(TRIM(description)) < " . self::MIN_COMPLETE_SUMMARY_LENGTH . "
-               OR (description LIKE '%...' AND LENGTH(description) < " . self::RSS_SNIPPET_MAX_LENGTH . ")
+            WHERE (
+                description IS NULL
+                OR TRIM(description) = ''
+                OR LENGTH(TRIM(description)) < " . self::MIN_COMPLETE_SUMMARY_LENGTH . "
+                OR (description LIKE '%...' AND LENGTH(description) < " . self::RSS_SNIPPET_MAX_LENGTH . ")
+            )
+            AND (summary_retry_at IS NULL OR summary_retry_at <= datetime('now'))
             ORDER BY pub_date DESC
             LIMIT :limit
         ");
@@ -308,6 +319,20 @@ class Database
     public function saveSummary(int $id, string $summary): void {
         $stmt = $this->pdo->prepare("UPDATE news SET description = :desc WHERE id = :id");
         $stmt->execute([':desc' => $summary, ':id' => $id]);
+    }
+
+    /** Programa un reintento de resumen IA para el artículo dado. */
+    public function setSummaryRetryAt(int $id, int $timestamp): void {
+        $stmt = $this->pdo->prepare(
+            "UPDATE news SET summary_retry_at = datetime(:ts, 'unixepoch') WHERE id = :id"
+        );
+        $stmt->execute([':ts' => $timestamp, ':id' => $id]);
+    }
+
+    /** Limpia la cola de reintento cuando el resumen se generó con éxito. */
+    public function clearSummaryRetryAt(int $id): void {
+        $stmt = $this->pdo->prepare("UPDATE news SET summary_retry_at = NULL WHERE id = :id");
+        $stmt->execute([':id' => $id]);
     }
 
     /**

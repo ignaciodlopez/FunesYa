@@ -17,6 +17,7 @@ class ArticleSummarizer
     private const GEMINI_TIMEOUT  = 25;
     private const GEMINI_MAX_RETRIES = 3;
     private const GEMINI_RETRY_BASE_MS = 700;
+    private const MIN_ACCEPTABLE_SUMMARY_LENGTH = 120;
     private const MIN_PARA_LENGTH = 60;
     private const MAX_PARAGRAPHS  = 8;
     private const MAX_TEXT_CHARS  = 4000;   // ~1 000 tokens; evita derrochar cuota de Gemini
@@ -61,14 +62,19 @@ class ArticleSummarizer
 
         $text = $this->scrapeText($article['link']);
         if ($text === null) {
+            $this->db->setSummaryRetryAt((int)$article['id'], time() + 3600);
             return null;
         }
 
         $summary = $this->callGemini($text)
             ?? $this->fallbackSummary($text);
+        $summary = $this->finalizeSummary($summary);
 
         if ($summary !== null) {
             $this->db->saveSummary($article['id'], $summary);
+            $this->db->clearSummaryRetryAt((int)$article['id']);
+        } else {
+            $this->db->setSummaryRetryAt((int)$article['id'], time() + 3600);
         }
 
         return $summary;
@@ -84,10 +90,16 @@ class ArticleSummarizer
      */
     public function generateFromText(string $text, int $id): ?string
     {
-        $summary = $this->callGemini($text) ?? $this->fallbackSummary($text);
+        // Para snippets RSS evitamos fallback textual: si Gemini falla,
+        // devolver null impide persistir textos recortados como "... El".
+        $summary = $this->callGemini($text);
+        $summary = $this->finalizeSummary($summary);
 
         if ($summary !== null) {
             $this->db->saveSummary($id, $summary);
+            $this->db->clearSummaryRetryAt($id);
+        } else {
+            $this->db->setSummaryRetryAt($id, time() + 3600);
         }
 
         return $summary;
@@ -329,6 +341,30 @@ class ArticleSummarizer
     {
         $paragraphs = explode("\n\n", $text);
         return implode("\n\n", array_slice($paragraphs, 0, 2));
+    }
+
+    /** Normaliza y descarta resúmenes demasiado cortos o claramente truncados. */
+    private function finalizeSummary(?string $summary): ?string
+    {
+        if ($summary === null) {
+            return null;
+        }
+
+        $summary = trim(preg_replace('/\s+/u', ' ', $summary) ?? '');
+        if ($summary === '') {
+            return null;
+        }
+
+        if (mb_strlen($summary, 'UTF-8') < self::MIN_ACCEPTABLE_SUMMARY_LENGTH) {
+            return null;
+        }
+
+        $lastChar = mb_substr($summary, -1, 1, 'UTF-8');
+        if (!in_array($lastChar, ['.', '!', '?', '…'], true)) {
+            return null;
+        }
+
+        return $summary;
     }
 
     /** Escribe una línea en el log compartido con el Aggregator. */
