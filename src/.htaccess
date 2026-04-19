@@ -1,3 +1,0 @@
-# Bloquear acceso web directo a los archivos fuente PHP.
-# Estos archivos solo pueden ser incluidos mediante require_once desde PHP.
-Require all denied

@@ -1,10 +1,10 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/src/Database.php';
-require_once __DIR__ . '/src/Config.php';
-require_once __DIR__ . '/src/ArticleSummarizer.php';
-require_once __DIR__ . '/src/ArticleLoader.php';
+require_once __DIR__ . '/../src/Database.php';
+require_once __DIR__ . '/../src/Config.php';
+require_once __DIR__ . '/../src/ArticleSummarizer.php';
+require_once __DIR__ . '/../src/ArticleLoader.php';
 
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 if ($id <= 0) {

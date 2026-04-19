@@ -43,7 +43,7 @@ const CACHE_TTL_LARGE = 86400;
 const CACHE_SMALL_THRESHOLD = 50 * 1024; // 50 KB
 
 // Directorio de caché (dentro de data/ que ya está protegido por .htaccess)
-$cacheDir = __DIR__ . '/../data/img_cache';
+$cacheDir = __DIR__ . '/../../data/img_cache';
 
 // Limpieza proactiva: borrar archivos expirados una vez cada ~200 requests
 // (probabilidad 0.5 % para no impactar latencia en el caso habitual)

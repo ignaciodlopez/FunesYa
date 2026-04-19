@@ -13,7 +13,10 @@ RUN apt-get update && apt-get install -y \
 # Habilitar mod_rewrite para que funcione el .htaccess
 RUN a2enmod rewrite
 
-# Permitir AllowOverride All en el directorio raíz
+# Cambiar DocumentRoot a public/ (separa el código público de los archivos privados)
+RUN sed -i 's|DocumentRoot /var/www/html$|DocumentRoot /var/www/html/public|' /etc/apache2/sites-available/000-default.conf
+
+# Permitir AllowOverride All en el directorio raíz (necesario para .htaccess en public/)
 RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/AllowOverride All/' /etc/apache2/apache2.conf
 
 # Copiar código fuente
@@ -23,6 +26,9 @@ COPY . /var/www/html/
 RUN mkdir -p /var/www/html/data/img_cache \
     && chown -R www-data:www-data /var/www/html/data \
     && chmod -R 775 /var/www/html/data
+
+# Asegurar que public/ exista y sea accesible
+RUN chown -R www-data:www-data /var/www/html/public
 
 # Cron job: ejecuta el aggregator cada 2 minutos como www-data
 # El script ya tiene flock() para evitar ejecuciones simultáneas

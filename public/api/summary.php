@@ -11,9 +11,9 @@ ini_set('max_execution_time', '60');
 
 header('Content-Type: application/json; charset=utf-8');
 
-require_once __DIR__ . '/../src/Config.php';
-require_once __DIR__ . '/../src/Database.php';
-require_once __DIR__ . '/../src/ArticleSummarizer.php';
+require_once __DIR__ . '/../../src/Config.php';
+require_once __DIR__ . '/../../src/Database.php';
+require_once __DIR__ . '/../../src/ArticleSummarizer.php';
 
 $id = filter_input(INPUT_GET, 'id', FILTER_VALIDATE_INT);
 if ($id === null || $id === false || $id <= 0) {

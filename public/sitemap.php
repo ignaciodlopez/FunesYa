@@ -8,8 +8,8 @@ declare(strict_types=1);
  * Máximo 50 000 URLs por archivo (límite de Google Sitemaps).
  */
 
-require_once __DIR__ . '/src/Database.php';
-require_once __DIR__ . '/src/Config.php';
+require_once __DIR__ . '/../src/Database.php';
+require_once __DIR__ . '/../src/Config.php';
 
 Config::bootstrap();
 

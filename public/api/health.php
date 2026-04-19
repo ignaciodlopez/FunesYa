@@ -5,12 +5,12 @@ header('Content-Type: application/json; charset=utf-8');
 header('X-Content-Type-Options: nosniff');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
-require_once __DIR__ . '/../src/Database.php';
+require_once __DIR__ . '/../../src/Database.php';
 
 try {
     $db = new Database();
 
-    $statusFile = __DIR__ . '/../data/aggregator_status.json';
+    $statusFile = __DIR__ . '/../../data/aggregator_status.json';
     $aggregatorStatus = null;
     if (is_file($statusFile)) {
         $rawStatus = file_get_contents($statusFile);
