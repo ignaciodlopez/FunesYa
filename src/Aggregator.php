@@ -906,8 +906,105 @@ class Aggregator
      * @param string $url URL del artículo
      * @return string|null URL de la imagen, o null si no se encontró
      */
+
     private function fetchOgImage(string $link): ?string
     {
+        // Descargar HTML con rango adecuado
+        $readHtml = function (bool $useRange, int $bytes) use ($link): ?string {
+            $ctx = stream_context_create([
+                'http' => [
+                    'timeout'    => 10,
+                    'user_agent' => self::USER_AGENT,
+                    'header'     => $useRange ? "Range: bytes=0-$bytes\r\n" : "",
+                    'follow_location' => 1,
+                    'max_redirects'   => 5,
+                ],
+                'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+            ]);
+            $content = @file_get_contents($link, false, $ctx);
+            return ($content !== false) ? (string)$content : null;
+        };
+
+        $isEstacionline = str_contains($link, 'estacionline.com');
+        $scanWindow = $isEstacionline ? 150000 : 70000;
+        $html = $readHtml(true, $scanWindow);
+        if ($html === null) {
+            return null;
+        }
+
+        $parsed = parse_url($link);
+        $scheme = $parsed['scheme'] ?? 'https';
+        $host   = $parsed['host']   ?? '';
+        $candidates = [];
+
+        // 1. Buscar imágenes en <article> y <main> con clases relevantes
+        if ($isEstacionline && empty($candidates)) {
+            $contentClasses = [
+                'entry-content', 'post-content', 'article-content',
+                'single-content', 'main-content', 'content', 'article-body', 'nota-content', 'nota-body', 'nota', 'contenido', 'body-content'
+            ];
+            $tags = ['article', 'main'];
+            $found = false;
+            foreach ($tags as $tagName) {
+                foreach ($contentClasses as $class) {
+                    $pattern = '/<' . $tagName . '[^>]+class=["\"][^"\"]*' . preg_quote($class, '/') . '[^"\"]*["\"][^>]*>(.*?)<\/' . $tagName . '>/is';
+                    if (preg_match($pattern, $html, $m)) {
+                        $mainContent = $m[1];
+                        if (preg_match_all('/<img\b[^>]*>/i', $mainContent, $imgTags, PREG_OFFSET_CAPTURE)) {
+                            foreach ($imgTags[0] as $imgInfo) {
+                                $tag = $imgInfo[0];
+                                $url = $this->extractImageCandidateFromTag($tag);
+                                if ($url === null) continue;
+                                $score = 340; // Prioridad alta por estar en <article> o <main>
+                                $candidates[$url] = max(($candidates[$url] ?? 0), $score);
+                            }
+                        }
+                        $found = true;
+                        break;
+                    }
+                }
+                if ($found) break;
+            }
+        }
+
+    // 2. Buscar imágenes con background-image en línea cerca del título
+    if ($isEstacionline && empty($candidates)) {
+        if (preg_match('/<h1[^>]*>(.*?)<\/h1>/is', $html, $hm)) {
+            $titleHtml = $hm[0];
+            $pos = strpos($html, $titleHtml);
+            if ($pos !== false) {
+                $afterTitle = substr($html, $pos + strlen($titleHtml), 10000);
+                // Buscar div o section con background-image
+                if (preg_match('/<(div|section)[^>]*style=["\"][^"\"]*background-image\s*:\s*url\(([^)]+)\)[^>]*>/i', $afterTitle, $bgMatch)) {
+                    $bgUrl = trim($bgMatch[2], "'\" ");
+                    if ($bgUrl !== '') {
+                        $score = 390;
+                        $candidates[$bgUrl] = $score;
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Buscar imágenes con data-src, srcset, etc. en todo el HTML si aún no hay candidatos
+    if ($isEstacionline && empty($candidates)) {
+        if (preg_match_all('/<img\b[^>]*>/i', $html, $imgTags, PREG_OFFSET_CAPTURE)) {
+            foreach ($imgTags[0] as $imgInfo) {
+                $tag = $imgInfo[0];
+                $url = $this->extractImageCandidateFromTag($tag);
+                if ($url === null) continue;
+                $score = 50;
+                // Priorizar si tiene data-src o srcset
+                if (preg_match('/data-src|srcset/i', $tag)) {
+                    $score += 60;
+                }
+                $candidates[$url] = max(($candidates[$url] ?? 0), $score);
+            }
+        }
+    }
+
+    // ...seguir con el resto de la función original (scoring, meta tags, etc)...
+        // Descargar HTML con rango adecuado
         $readHtml = function (bool $useRange, int $bytes) use ($link): ?string {
             $ctx = stream_context_create([
                 'http' => [
@@ -936,12 +1033,63 @@ class Aggregator
 
         $candidates = [];
 
+        // --- MEJORA PARA ESTACIONLINE ---
+        // Si es Estacionline, buscar imágenes dentro del contenido principal y priorizarlas
+        if ($isEstacionline) {
+            $contentClasses = [
+                'entry-content', 'post-content', 'article-content',
+                'single-content', 'main-content', 'content', 'article-body', 'nota-content', 'nota-body', 'nota', 'contenido', 'body-content'
+            ];
+            $tags = ['div', 'section', 'figure'];
+            $found = false;
+            foreach ($tags as $tagName) {
+                foreach ($contentClasses as $class) {
+                    $pattern = '/<' . $tagName . '[^>]+class=["\"][^"\"]*' . preg_quote($class, '/') . '[^"\"]*["\"][^>]*>(.*?)<\/' . $tagName . '>/is';
+                    if (preg_match($pattern, $html, $m)) {
+                        $mainContent = $m[1];
+                        if (preg_match_all('/<img\b[^>]*>/i', $mainContent, $imgTags, PREG_OFFSET_CAPTURE)) {
+                            foreach ($imgTags[0] as $imgInfo) {
+                                $tag = $imgInfo[0];
+                                $url = $this->extractImageCandidateFromTag($tag);
+                                if ($url === null) continue;
+                                $score = 350; // Prioridad máxima por estar en el contenido principal
+                                $candidates[$url] = max(($candidates[$url] ?? 0), $score);
+                            }
+                        }
+                        $found = true;
+                        break;
+                    }
+                }
+                if ($found) break;
+            }
+
+            // Si no se encontró imagen prioritaria en bloques principales, buscar la primera imagen después del título
+            if (empty($candidates)) {
+                if (preg_match('/<h1[^>]*>(.*?)<\/h1>/is', $html, $hm)) {
+                    $titleHtml = $hm[0];
+                    $pos = strpos($html, $titleHtml);
+                    if ($pos !== false) {
+                        // Buscar la primera imagen después del título (en los siguientes 5000 caracteres)
+                        $afterTitle = substr($html, $pos + strlen($titleHtml), 5000);
+                        if (preg_match('/<img\b[^>]*>/i', $afterTitle, $imgTag)) {
+                            $tag = $imgTag[0];
+                            $url = $this->extractImageCandidateFromTag($tag);
+                            if ($url !== null) {
+                                $score = 400; // Prioridad máxima por ser la primera imagen tras el título
+                                $candidates[$url] = $score;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         // 1º: imágenes destacadas vía meta tags (og:image, twitter:image)
         $metaPatterns = [
-            'og:image'      => '/<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']/i',
-            'og:image_rev'  => '/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']/i',
-            'twitter:image' => '/<meta[^>]+(?:name|property)=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']/i',
-            'tw_image_rev'  => '/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']twitter:image(?::src)?["\']/i',
+            'og:image'      => '/<meta[^>]+property=["\']og:image(?:secure_url)?["\'][^>]+content=["\']([^"\']+)["\']/i',
+            'og:image_rev'  => '/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?:secure_url)?["\']/i',
+            'twitter:image' => '/<meta[^>]+(?:name|property)=["\']twitter:image(?:src)?["\'][^>]+content=["\']([^"\']+)["\']/i',
+            'tw_image_rev'  => '/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']twitter:image(?:src)?["\']/i',
         ];
         foreach ($metaPatterns as $key => $pattern) {
             if (preg_match_all($pattern, $html, $matches)) {
@@ -963,7 +1111,6 @@ class Aggregator
         $keywords = [];
         if (preg_match('/<title>([^<]+)/i', $html, $tm)) {
             $cleanedTitle = html_entity_decode($tm[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
-            // Quitar acentos y caracteres especiales para mejor match
             $cleanedTitle = str_replace(
                 ['á', 'é', 'í', 'ó', 'ú', 'ñ'],
                 ['a', 'e', 'i', 'o', 'u', 'n'],
@@ -973,6 +1120,38 @@ class Aggregator
             $keywords = array_filter(explode(' ', $cleanedTitle), fn($w) => strlen($w) > 3);
         }
 
+        // --- MEJORA PARA ESTACIONLINE ---
+        // Si es Estacionline, buscar imágenes dentro del contenido principal y priorizarlas
+        if ($isEstacionline) {
+            // Buscar el bloque principal de contenido (más clases soportadas y más etiquetas)
+            $contentClasses = [
+                'entry-content', 'post-content', 'article-content',
+                'single-content', 'main-content', 'content', 'article-body', 'nota-content', 'nota-body', 'nota', 'contenido', 'body-content'
+            ];
+            $tags = ['div', 'section', 'figure'];
+            $found = false;
+            foreach ($tags as $tagName) {
+                foreach ($contentClasses as $class) {
+                    $pattern = '/<' . $tagName . '[^>]+class=["\'][^"\']*' . preg_quote($class, '/') . '[^"\']*["\'][^>]*>(.*?)<\/' . $tagName . '>/is';
+                    if (preg_match($pattern, $html, $m)) {
+                        $mainContent = $m[1];
+                        if (preg_match_all('/<img\b[^>]*>/i', $mainContent, $imgTags, PREG_OFFSET_CAPTURE)) {
+                            foreach ($imgTags[0] as $imgInfo) {
+                                $tag = $imgInfo[0];
+                                $url = $this->extractImageCandidateFromTag($tag);
+                                if ($url === null) continue;
+                                $score = 350; // Prioridad máxima por estar en el contenido principal
+                                $candidates[$url] = max(($candidates[$url] ?? 0), $score);
+                            }
+                        }
+                        $found = true;
+                        break;
+                    }
+                }
+                if ($found) break;
+            }
+        }
+
         // 3º: Todas las etiquetas <img> en el área escaneada (con captura de offset para penalizar distancia)
         if (preg_match_all('/<img\b[^>]*>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
             foreach ($matches[0] as $mInfo) {
@@ -980,16 +1159,11 @@ class Aggregator
                 $offset = $mInfo[1];
                 $url = $this->extractImageCandidateFromTag($tag);
                 if ($url === null) continue;
-                
-                $score = 20; 
+                $score = 20;
                 if (preg_match('/class=["\'][^"\']*(?:wp-post-image|featured|hero|article|post-image|entry-image)[^"\']*/i', $tag)) {
                     $score += 150;
                 }
-
-                // Penalización por distancia: restamos puntos cuanto más lejos esté de la parte superior
-                // (Los widgets de notas relacionadas suelen aparecer más abajo)
-                $score -= (int)($offset / 2000); 
-                
+                $score -= (int)($offset / 2000);
                 $candidates[$url] = max(($candidates[$url] ?? 0), $score);
             }
         }
@@ -1023,13 +1197,22 @@ class Aggregator
             $resolved = $this->resolveImageUrl($url, $scheme, $host);
             if ($resolved === null) continue;
             $resolved = $this->normalizeImageUrl($resolved);
-            
             if (!$this->isUsableImage($resolved)) continue;
 
             $finalScore = $baseScore;
             $filename = strtolower(basename($resolved));
-            
-            // Relevancia semántica: si el nombre del archivo contiene palabras del título
+
+            // --- Penalización especial para placeholders de Estacionline ---
+            if ($isEstacionline) {
+                $slug = '';
+                if (preg_match('~/([^/]+)/?$~', parse_url($link, PHP_URL_PATH) ?? '', $sm)) {
+                    $slug = $sm[1];
+                }
+                if ($slug !== '' && preg_match('/^' . preg_quote($slug, '/') . '\.(jpe?g|png|webp|avif)$/i', $filename)) {
+                    $finalScore -= 200;
+                }
+            }
+
             $matchCount = 0;
             $cleanFilename = str_replace(['á', 'é', 'í', 'ó', 'ú', 'ñ'], ['a', 'e', 'i', 'o', 'u', 'n'], $filename);
             foreach ($keywords as $word) {
@@ -1037,36 +1220,39 @@ class Aggregator
                     $matchCount++;
                 }
             }
-            if ($matchCount >= 2) $finalScore += 120; // ¡Bono gigante por relevancia!
+            if ($matchCount >= 2) $finalScore += 120;
             elseif ($matchCount >= 1) $finalScore += 50;
 
-            // Priorizar imágenes con indicación de tamaño/versión real
             if (preg_match('/-scaled/i', $filename)) {
                 $finalScore += 60;
             }
             if (preg_match('/-\d+x\d+\.(?:jpg|png|webp)/i', $filename)) {
                 if (preg_match('/-(?:150x150|100x100|75x75)\./i', $filename)) {
-                    $finalScore -= 80; // Penalización fuerte para miniaturas cuadradas pequeñas
+                    $finalScore -= 80;
                 } else {
-                    $finalScore += 30; // Otros tamaños de WP son buenos
+                    $finalScore += 30;
                 }
             }
-            
-            echo "DEBUG_CANDIDATE: $resolved | Score: $finalScore (Base: $baseScore) | Matches: $matchCount (" . implode(',', $keywords) . ")\n";
+
+            // --- DEBUG: Mostrar ranking de imágenes candidatas ---
+            echo "DEBUG_IMG: $resolved | Score: $finalScore (Base: $baseScore) | Archivo: $filename | Matches: $matchCount Palabras: [" . implode(',', $keywords) . "]\n";
+
             $scored[$resolved] = max(($scored[$resolved] ?? 0), $finalScore);
         }
 
         if (empty($scored)) {
-            echo "DEBUG: No scored candidates!\n";
+            echo "DEBUG: No hay imágenes candidatas válidas.\n";
             return null;
         }
 
         arsort($scored);
+        $i = 1;
         foreach($scored as $u => $s) {
-            echo "RANKING: $s | $u\n";
+            echo "RANKING $i: $s | $u\n";
+            $i++;
         }
         reset($scored);
-        
+
         return (string)key($scored);
     }
 

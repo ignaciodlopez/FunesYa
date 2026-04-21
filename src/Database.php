@@ -385,16 +385,33 @@ class Database
      * @param int $limit Máximo de artículos a devolver por ciclo
      * @return array<int, array{id: int, link: string}>
      */
+    /**
+     * Devuelve artículos recientes que requieren reparación de imagen:
+     * - image_url vacío/nulo
+     * - o image_url genérica (stock, logo, avatar, etc.)
+     */
     public function getRecentArticlesWithoutImage(int $limit = 15): array {
-        $stmt = $this->pdo->prepare("
+        // Patrones de imágenes genéricas
+        $genericPatterns = [
+            '%logo%', '%favicon%', '%favicom%', '%avatar%', '%placeholder%', '%default%', '%no-image%',
+            '%sin-imagen%', '%site-share%', '%share-default%', '%og-default%', '%brand%',
+            '%social-image-generator%', '%sig-image%', '%sig=%', '%icon%', '%nav-logo%',
+            '%miniatura%', '%youtube%', '%picsum.photos/%', '%images.unsplash.com/%'
+        ];
+        $whereGen = implode(' OR ', array_map(fn($p) => "image_url LIKE '$p'", $genericPatterns));
+        $sql = "
             SELECT id, link
             FROM news
-            WHERE (image_url IS NULL OR TRIM(image_url) = '')
+            WHERE (
+                image_url IS NULL OR TRIM(image_url) = ''
+                OR $whereGen
+            )
               AND pub_date >= datetime('now', '-14 days')
               AND link NOT LIKE 'https://example.com%'
             ORDER BY pub_date DESC
             LIMIT :limit
-        ");
+        ";
+        $stmt = $this->pdo->prepare($sql);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
