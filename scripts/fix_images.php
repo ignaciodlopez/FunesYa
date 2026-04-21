@@ -45,7 +45,41 @@ $stmtEstacion = $dbPdo->prepare($sqlEstacion);
 $stmtEstacion->execute();
 echo "- Estación Online: Se resetearon " . $stmtEstacion->rowCount() . " imágenes de plantilla.\n";
 
-// 1.2. Resetear imágenes de stock (Picsum/Unsplash)
+// 1.2. Resetear imágenes "falsamente legítimas" de Estación Online (slug.jpg sin sufijos)
+// Buscamos artículos de Estacionline cuyas imágenes no tengan guiones seguidos de números ni palabras clave de escalado.
+// NOTA: Como SQLite no soporta regex complejas en UPDATE directo fácilmente, lo hacemos por ID.
+$stmtEstacionAdv = $dbPdo->query("
+    SELECT id, image_url 
+    FROM news 
+    WHERE source = 'Estacionline' 
+      AND image_url IS NOT NULL
+");
+$toReset = [];
+while ($row = $stmtEstacionAdv->fetch(PDO::FETCH_ASSOC)) {
+    $filename = basename(parse_url($row['image_url'], PHP_URL_PATH) ?? '');
+    // 1. Si es de Estacionline y parece la imagen generada por texto (slug sin sufijos)
+    $isEstacionPlaceholder = (preg_match('/^[a-z0-9-]+\.(jpe?g|png|webp|avif)$/i', $filename) && !preg_match('/-\d+|scaled/i', $filename));
+    
+    // 2. Si contiene palabras clave de imágenes genéricas (logo, favicon, etc.)
+    $isGeneric = false;
+    $genericPatterns = ['logo', 'favicon', 'favicom', 'avatar', 'placeholder', 'icon', 'brand', 'nav-logo'];
+    foreach ($genericPatterns as $p) {
+        if (str_contains(strtolower($row['image_url']), $p)) {
+            $isGeneric = true;
+            break;
+        }
+    }
+
+    if ($isEstacionPlaceholder || $isGeneric) {
+        $toReset[] = $row['id'];
+    }
+}
+if (!empty($toReset)) {
+    $dbPdo->exec("UPDATE news SET image_url = NULL WHERE id IN (" . implode(',', $toReset) . ")");
+}
+echo "- Estación Online (Avanzado): Se resetearon " . count($toReset) . " imágenes genéricas o de plantilla.\n";
+
+// 1.3. Resetear imágenes de stock (Picsum/Unsplash)
 $sqlStock = "UPDATE news 
              SET image_url = NULL 
              WHERE image_url LIKE 'https://picsum.photos/%' 

@@ -687,10 +687,24 @@ class Aggregator
      */
     private function isLikelyGenericSiteImage(string $url): bool {
         $lower = strtolower($url);
+
+        // Estacionline: Detectar imágenes dinámicas de redes sociales.
+        // Suelen tener exactamente el nombre del slug sin sufijos de versión o tamaño.
+        if (str_contains($lower, 'estacionline.com/wp-content/uploads/')) {
+            $path = parse_url($url, PHP_URL_PATH) ?? '';
+            $filename = basename($path);
+            // Si el nombre del archivo no tiene guiones seguidos de números (-1, -1024x768)
+            // ni la palabra 'scaled', es casi seguro la imagen generada por texto.
+            if (preg_match('/^[a-z0-9-]+\.jpe?g$/i', $filename) && !preg_match('/-\d+|scaled/i', $filename)) {
+                return true;
+            }
+        }
+
         $patterns = [
-            'logo', 'favicon', 'avatar', 'placeholder', 'default', 'no-image',
+            'logo', 'favicon', 'favicom', 'avatar', 'placeholder', 'default', 'no-image',
             'sin-imagen', 'site-share', 'share-default', 'og-default', 'brand',
-            'social-image-generator', 'sig-image', 'sig=', 'icon'
+            'social-image-generator', 'sig-image', 'sig=', 'icon', 'nav-logo',
+            'miniatura', 'youtube', 'placeholder'
         ];
 
         foreach ($patterns as $pattern) {
@@ -892,243 +906,168 @@ class Aggregator
      * @param string $url URL del artículo
      * @return string|null URL de la imagen, o null si no se encontró
      */
-    private function fetchOgImage(string $url): ?string
+    private function fetchOgImage(string $link): ?string
     {
-        // Intento rápido: leer los primeros KB (normalmente ahí está el <head>).
-        // Si no alcanza para detectar imagen, se reintenta sin Range leyendo más bytes.
-        $readHtml = function (bool $useRange, int $maxBytes) use ($url): ?string {
-            $headers = "Accept: text/html,*/*\r\nAccept-Language: es-AR,es;q=0.9\r\n";
-            if ($useRange) {
-                $headers .= "Range: bytes=0-" . ($maxBytes - 1) . "\r\n";
-            }
-
+        $readHtml = function (bool $useRange, int $bytes) use ($link): ?string {
             $ctx = stream_context_create([
                 'http' => [
-                    'timeout'         => 8,
-                    'user_agent'      => self::USER_AGENT,
+                    'timeout'    => 10,
+                    'user_agent' => self::USER_AGENT,
+                    'header'     => $useRange ? "Range: bytes=0-$bytes\r\n" : "",
                     'follow_location' => 1,
-                    'max_redirects'   => 3,
-                    'header'          => $headers,
+                    'max_redirects'   => 5,
                 ],
                 'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
             ]);
-
-            $fp = @fopen($url, 'rb', false, $ctx);
-            if ($fp === false) {
-                return null;
-            }
-
-            $html = '';
-            while (!feof($fp) && strlen($html) < $maxBytes) {
-                $chunk = fread($fp, 8192);
-                if ($chunk === false) {
-                    break;
-                }
-                $html .= $chunk;
-
-                // Cortar temprano cuando ya cerró <head>: reduce trabajo en páginas pesadas.
-                if (stripos($html, '</head>') !== false && strlen($html) >= 8192) {
-                    break;
-                }
-            }
-            fclose($fp);
-
-            return $html !== '' ? $html : null;
+            $content = @file_get_contents($link, false, $ctx);
+            return ($content !== false) ? (string)$content : null;
         };
 
-        $html = $readHtml(true, 65536); // Aumentado de 30KB a 64KB para capturar metadatos en páginas con mucho inline CSS/JS.
+        $isEstacionline = str_contains($link, 'estacionline.com');
+        $scanWindow = $isEstacionline ? 150000 : 70000;
+        $html = $readHtml(true, $scanWindow);
         if ($html === null) {
             return null;
         }
 
-        $parsed = parse_url($url);
+        $parsed = parse_url($link);
         $scheme = $parsed['scheme'] ?? 'https';
         $host   = $parsed['host']   ?? '';
 
         $candidates = [];
 
-        // 1º: imágenes destacadas / hero en el HTML
-        if (preg_match_all('/<img\b[^>]*class=["\'][^"\']*(?:wp-post-image|featured|hero|article|post-image|entry-image)[^"\']*["\'][^>]*>/i', $html, $matches)) {
-            foreach ($matches[0] as $tag) {
-                $candidate = $this->extractImageCandidateFromTag($tag);
-                if ($candidate !== null) {
-                    $candidates[] = $candidate;
-                }
-            }
-        }
-
-        // 2º: og:image / twitter:image del <head>
-        $head = substr($html, 0, 30000);
+        // 1º: imágenes destacadas vía meta tags (og:image, twitter:image)
         $metaPatterns = [
-            '/<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']/i',
-            '/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']/i',
-            '/<meta[^>]+(?:name|property)=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']/i',
-            '/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']twitter:image(?::src)?["\']/i',
+            'og:image'      => '/<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']/i',
+            'og:image_rev'  => '/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']/i',
+            'twitter:image' => '/<meta[^>]+(?:name|property)=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']/i',
+            'tw_image_rev'  => '/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']twitter:image(?::src)?["\']/i',
         ];
-        foreach ($metaPatterns as $pattern) {
-            if (preg_match_all($pattern, $head, $matches)) {
+        foreach ($metaPatterns as $key => $pattern) {
+            if (preg_match_all($pattern, $html, $matches)) {
                 foreach ($matches[1] as $raw) {
                     $raw = trim($raw);
-                    if ($raw !== '') {
-                        $candidates[] = $raw;
-                    }
+                    if ($raw !== '') $candidates[$raw] = ($candidates[$raw] ?? 0) + 80;
                 }
             }
         }
-
-        // 3º: JSON-LD (formato Yoast y estándar). Busca el campo "url" cuando "image" es un objeto, o el string directo.
         if (preg_match_all('/"image"\s*:\s*(?:\{[^}]*"url"\s*:\s*"([^"]+)"|(?:"([^"]+)"))/i', $html, $matches)) {
             foreach ($matches[1] as $i => $raw) {
                 $raw = $raw !== '' ? $raw : $matches[2][$i];
                 $raw = trim((string)$raw);
-                if ($raw !== '') {
-                    $candidates[] = $raw;
-                }
+                if ($raw !== '') $candidates[$raw] = ($candidates[$raw] ?? 0) + 70;
             }
         }
 
-        // 4º: fallback final sobre todas las imágenes del documento (soporta lazy-loading)
-        if (preg_match_all('/<img\b[^>]*>/i', $html, $matches)) {
-            foreach ($matches[0] as $tag) {
-                $candidate = $this->extractImageCandidateFromTag($tag);
-                if ($candidate !== null) {
-                    $candidates[] = $candidate;
+        // 0. Preparar palabras clave del título para scoring semántico
+        $keywords = [];
+        if (preg_match('/<title>([^<]+)/i', $html, $tm)) {
+            $cleanedTitle = html_entity_decode($tm[1], ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            // Quitar acentos y caracteres especiales para mejor match
+            $cleanedTitle = str_replace(
+                ['á', 'é', 'í', 'ó', 'ú', 'ñ'],
+                ['a', 'e', 'i', 'o', 'u', 'n'],
+                strtolower($cleanedTitle)
+            );
+            $cleanedTitle = preg_replace('/[^a-z0-9 ]/', ' ', $cleanedTitle);
+            $keywords = array_filter(explode(' ', $cleanedTitle), fn($w) => strlen($w) > 3);
+        }
+
+        // 3º: Todas las etiquetas <img> en el área escaneada (con captura de offset para penalizar distancia)
+        if (preg_match_all('/<img\b[^>]*>/i', $html, $matches, PREG_OFFSET_CAPTURE)) {
+            foreach ($matches[0] as $mInfo) {
+                $tag = $mInfo[0];
+                $offset = $mInfo[1];
+                $url = $this->extractImageCandidateFromTag($tag);
+                if ($url === null) continue;
+                
+                $score = 20; 
+                if (preg_match('/class=["\'][^"\']*(?:wp-post-image|featured|hero|article|post-image|entry-image)[^"\']*/i', $tag)) {
+                    $score += 150;
                 }
+
+                // Penalización por distancia: restamos puntos cuanto más lejos esté de la parte superior
+                // (Los widgets de notas relacionadas suelen aparecer más abajo)
+                $score -= (int)($offset / 2000); 
+                
+                $candidates[$url] = max(($candidates[$url] ?? 0), $score);
             }
         }
 
-        // 5º: URLs de imagen embebidas en JSON o scripts del HTML (útil para CDNs modernos)
-        if (preg_match_all('~https?://[^"\'\s<>]+\.(?:avif|webp|png|jpe?g)(?:\?[^"\'\s<>]*)?~i', $html, $matches)) {
-            foreach ($matches[0] as $raw) {
-                $raw = trim($raw);
-                if ($raw !== '') {
-                    $candidates[] = $raw;
-                }
-            }
-        }
-
-        foreach (array_unique($candidates) as $raw) {
-            $resolved = $this->resolveImageUrl($raw, $scheme, $host);
-            if ($resolved === null) {
-                continue;
-            }
-
-            $resolved = $this->normalizeImageUrl($resolved);
-            if ($this->isUsableImage($resolved)) {
-                return $resolved;
-            }
-        }
-
-        // Fallback robusto: algunos sitios no devuelven bien Range o ubican metadatos
-        // más allá del primer bloque. Reintentar sin Range con mayor ventana.
-        $htmlFull = $readHtml(false, 180000);
-        if ($htmlFull !== null && $htmlFull !== $html) {
-            $retryCandidates = [];
-
-            if (preg_match_all('/<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']/i', $htmlFull, $m1)) {
-                foreach ($m1[1] as $raw) {
-                    $raw = trim($raw);
-                    if ($raw !== '') {
-                        $retryCandidates[] = $raw;
-                    }
-                }
-            }
-            if (preg_match_all('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']/i', $htmlFull, $m2)) {
-                foreach ($m2[1] as $raw) {
-                    $raw = trim($raw);
-                    if ($raw !== '') {
-                        $retryCandidates[] = $raw;
-                    }
-                }
-            }
-            if (preg_match_all('/<meta[^>]+(?:name|property)=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']/i', $htmlFull, $m3)) {
-                foreach ($m3[1] as $raw) {
-                    $raw = trim($raw);
-                    if ($raw !== '') {
-                        $retryCandidates[] = $raw;
-                    }
-                }
-            }
-            if (preg_match_all('/<meta[^>]+content=["\']([^"\']+)["\'][^>]+(?:name|property)=["\']twitter:image(?::src)?["\']/i', $htmlFull, $m4)) {
-                foreach ($m4[1] as $raw) {
-                    $raw = trim($raw);
-                    if ($raw !== '') {
-                        $retryCandidates[] = $raw;
-                    }
-                }
-            }
-            if (preg_match_all('/"image"\s*:\s*"([^"]+)"/i', $htmlFull, $m5)) {
-                foreach ($m5[1] as $raw) {
-                    $raw = trim($raw);
-                    if ($raw !== '') {
-                        $retryCandidates[] = $raw;
-                    }
-                }
-            }
-
-            foreach (array_unique($retryCandidates) as $raw) {
-                $resolved = $this->resolveImageUrl($raw, $scheme, $host);
-                if ($resolved === null) {
-                    continue;
-                }
-
-                $resolved = $this->normalizeImageUrl($resolved);
-                if ($this->isUsableImage($resolved)) {
-                    return $resolved;
-                }
-            }
-        }
-
-        // Fallback WordPress/oEmbed: algunos temas no publican og:image pero sí
-        // exponen thumbnail_url en /wp-json/oembed/1.0/embed.
-        $oembedSource = $htmlFull ?? $html;
-        if (preg_match('/<link[^>]+type=["\']application\/json\+oembed["\'][^>]+href=["\']([^"\']+)["\']/i', $oembedSource, $om)
-            || preg_match('/<link[^>]+href=["\']([^"\']+)["\'][^>]+type=["\']application\/json\+oembed["\']/i', $oembedSource, $om)) {
-            $oembedUrl = trim(html_entity_decode($om[1], ENT_QUOTES | ENT_HTML5, 'UTF-8'));
-            $oembedUrl = $this->resolveImageUrl($oembedUrl, $scheme, $host);
-
-            if ($oembedUrl !== null && str_starts_with($oembedUrl, 'http')) {
-                $ctx = stream_context_create([
-                    'http' => [
-                        'timeout'         => 8,
-                        'user_agent'      => self::USER_AGENT,
-                        'follow_location' => 1,
-                        'max_redirects'   => 3,
-                        'header'          => "Accept: application/json,text/plain,*/*\r\n",
-                    ],
-                    'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
-                ]);
-
-                $oembedRaw = @file_get_contents($oembedUrl, false, $ctx);
-                if ($oembedRaw !== false && $oembedRaw !== '') {
-                    $oembed = json_decode($oembedRaw, true);
-                    if (is_array($oembed)) {
-                        $jsonCandidates = [
-                            trim((string)($oembed['thumbnail_url'] ?? '')),
-                            trim((string)($oembed['url'] ?? '')),
-                        ];
-
-                        foreach ($jsonCandidates as $cand) {
-                            if ($cand === '') {
-                                continue;
-                            }
-
-                            $resolved = $this->resolveImageUrl($cand, $scheme, $host);
-                            if ($resolved === null) {
-                                continue;
-                            }
-
-                            $resolved = $this->normalizeImageUrl($resolved);
-                            if ($this->isUsableImage($resolved)) {
-                                return $resolved;
-                            }
+        // Si no hay candidatos o el más prometedor es débil, reintentar con el HTML completo
+        if (empty($candidates)) {
+            $htmlFull = $readHtml(false, 350000);
+            if ($htmlFull && $htmlFull !== $html) {
+                if (preg_match_all('/<img\b[^>]*>/i', $htmlFull, $matches, PREG_OFFSET_CAPTURE)) {
+                    foreach ($matches[0] as $mInfo) {
+                        $tag = $mInfo[0];
+                        $offset = $mInfo[1];
+                        $url = $this->extractImageCandidateFromTag($tag);
+                        if ($url === null) continue;
+                        $score = 10;
+                        if (preg_match('/class=["\'][^"\']*(?:wp-post-image|featured|hero|article|post-image|entry-image)[^"\']*/i', $tag)) {
+                            $score += 150;
                         }
+                        $score -= (int)($offset / 3000);
+                        $candidates[$url] = max(($candidates[$url] ?? 0), $score);
                     }
                 }
             }
         }
 
-        return null;
+        if (empty($candidates)) return null;
+
+        // Scoring final basado en la URL misma y relevancia semántica
+        $scored = [];
+        foreach ($candidates as $url => $baseScore) {
+            $resolved = $this->resolveImageUrl($url, $scheme, $host);
+            if ($resolved === null) continue;
+            $resolved = $this->normalizeImageUrl($resolved);
+            
+            if (!$this->isUsableImage($resolved)) continue;
+
+            $finalScore = $baseScore;
+            $filename = strtolower(basename($resolved));
+            
+            // Relevancia semántica: si el nombre del archivo contiene palabras del título
+            $matchCount = 0;
+            $cleanFilename = str_replace(['á', 'é', 'í', 'ó', 'ú', 'ñ'], ['a', 'e', 'i', 'o', 'u', 'n'], $filename);
+            foreach ($keywords as $word) {
+                if (str_contains($cleanFilename, $word)) {
+                    $matchCount++;
+                }
+            }
+            if ($matchCount >= 2) $finalScore += 120; // ¡Bono gigante por relevancia!
+            elseif ($matchCount >= 1) $finalScore += 50;
+
+            // Priorizar imágenes con indicación de tamaño/versión real
+            if (preg_match('/-scaled/i', $filename)) {
+                $finalScore += 60;
+            }
+            if (preg_match('/-\d+x\d+\.(?:jpg|png|webp)/i', $filename)) {
+                if (preg_match('/-(?:150x150|100x100|75x75)\./i', $filename)) {
+                    $finalScore -= 80; // Penalización fuerte para miniaturas cuadradas pequeñas
+                } else {
+                    $finalScore += 30; // Otros tamaños de WP son buenos
+                }
+            }
+            
+            echo "DEBUG_CANDIDATE: $resolved | Score: $finalScore (Base: $baseScore) | Matches: $matchCount (" . implode(',', $keywords) . ")\n";
+            $scored[$resolved] = max(($scored[$resolved] ?? 0), $finalScore);
+        }
+
+        if (empty($scored)) {
+            echo "DEBUG: No scored candidates!\n";
+            return null;
+        }
+
+        arsort($scored);
+        foreach($scored as $u => $s) {
+            echo "RANKING: $s | $u\n";
+        }
+        reset($scored);
+        
+        return (string)key($scored);
     }
 
     private function extractImageCandidateFromTag(string $tag): ?string
