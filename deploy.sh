@@ -13,6 +13,9 @@ sleep 3
 echo "==> Running aggregator..."
 docker compose exec app php scripts/run_aggregator.php
 
+echo "==> Fixing existing images..."
+docker compose exec app php scripts/fix_images.php
+
 echo "==> Status:"
 docker compose ps
 docker compose logs --tail=30 app
