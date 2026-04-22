@@ -697,8 +697,22 @@ class Aggregator
             // ni la palabra 'scaled', podría ser una imagen placeholder.
             // PERO: Si tiene un nombre descriptivo largo (3+ palabras), es probablemente válida.
             if (preg_match('/^[a-z0-9-]+\.jpe?g$/i', $filename) && !preg_match('/-\d+|scaled/i', $filename)) {
+                // EXCEPCIÓN: Si el nombre es un hash/UUID (mezcla de letras y números sin palabras)
+                // NO rechazar, porque son imágenes legítimas con nombres aleatorios
+                $nameWithoutExt = preg_replace('/\.(jpe?g|png|webp|avif)$/i', '', $filename);
+                
+                // Detectar si es un hash: tiene números Y letras mezclados, sin guiones o con pocos guiones
+                $hasNumbers = preg_match('/\d/', $nameWithoutExt);
+                $hasLetters = preg_match('/[a-z]/i', $nameWithoutExt);
+                $dashCount = substr_count($nameWithoutExt, '-');
+                
+                // Si tiene números y letras mezclados, es probablemente un hash
+                if ($hasNumbers && $hasLetters && $dashCount <= 5) {
+                    return false; // NO rechazar hashes
+                }
+                
                 // Contar palabras (separadas por guiones)
-                $words = explode('-', strtolower(preg_replace('/\.(jpe?g|png|webp|avif)$/i', '', $filename)));
+                $words = explode('-', strtolower($nameWithoutExt));
                 $words = array_filter($words, fn($w) => strlen($w) > 2); // Filtrar palabras de 3+ letras
                 
                 // Si tiene 3+ palabras significativas, es probablemente una imagen descriptiva válida
